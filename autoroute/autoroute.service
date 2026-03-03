@@ -1,0 +1,24 @@
+[Unit]
+Description=AutoRoute GenAI Router
+After=network.target
+
+[Service]
+Type=simple
+User=autoroute
+Group=autoroute
+WorkingDirectory=/opt/autoroute
+ExecStart=/usr/bin/python3 /opt/autoroute/autoroute.py
+Restart=on-failure
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=autoroute
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

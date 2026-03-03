@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  autoroute:
+    build: .
+    container_name: autoroute
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    restart: unless-stopped
+    networks:
+      - genai
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+networks:
+  genai:
+    external: true

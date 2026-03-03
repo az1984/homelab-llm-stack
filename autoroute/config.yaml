@@ -1,0 +1,129 @@
+# AutoRoute Configuration
+# Edit VIP endpoints to match your local GenAI stack
+
+# Server configuration
+server:
+  host: "0.0.0.0"
+  port: 8080
+  log_level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+
+# Router model endpoint (Qwen3-8B for routing decisions)
+router:
+  vip: "http://router.local:8080"
+  timeout: 5
+  max_tokens: 120
+  temperature: 0.0
+  
+  # Truncation for router input
+  trunc_head_chars: 3000
+  trunc_tail_chars: 300
+
+# Text endpoints
+endpoints:
+  chat-quick:
+    vip: "http://chat-quick.local:8080"
+    description: "Fast general Q&A (default)"
+    timeout: 60
+    
+  chat-heavy:
+    vip: "http://chat-heavy.local:8080"
+    description: "Deep reasoning + architecture (reliable fallback)"
+    timeout: 90
+    
+  chat-devel:
+    vip: "http://chat-devel.local:8080"
+    description: "Implementation/debug/refactor (may be down)"
+    timeout: 60
+    probe_for_availability: true
+    fallback_hard: "chat-heavy"
+    fallback_light: "chat-quick"
+    
+  # Vision endpoints
+  chat-peeks:
+    vip: "http://chat-peeks.local:8080"
+    description: "Lightweight vision/OCR (Mini VLM pool)"
+    timeout: 45
+    probe_for_availability: false
+    fallback: "chat-looks"
+    
+  chat-looks:
+    vip: "http://chat-looks.local:8080"
+    description: "Heavy vision reasoning (may be down when Sparks busy)"
+    timeout: 90
+    probe_for_availability: true
+    fallback: "chat-peeks"
+    
+  # Media endpoints
+  chat-image:
+    vip: "http://chat-image.local:8080"
+    description: "Raster image generation (ComfyUI integration)"
+    timeout: 120
+    
+  chat-trans:
+    vip: "http://chat-trans.local:8080"
+    description: "Audio transcription (ASR)"
+    timeout: 60
+    
+  chat-watch:
+    vip: "http://chat-watch.local:8080"
+    description: "Video analysis"
+    timeout: 90
+    
+  chat-speak:
+    vip: "http://chat-speak.local:8080"
+    description: "Text-to-speech"
+    timeout: 60
+    
+  chat-video:
+    vip: "http://chat-video.local:8080"
+    description: "Video generation (placeholder)"
+    timeout: 120
+
+# Probing configuration
+probing:
+  enabled: true
+  timeout: 2
+  method: "HEAD"  # HEAD or GET
+  path: "/health"  # or "/" if no health endpoint
+
+# Ripcord (per-conversation manual override)
+ripcord:
+  enabled: true
+  # Ripcord state stored in memory (resets on service restart)
+  
+  # Escalate triggers
+  escalate_triggers:
+    - "ripcord"
+    - "use the bigger model"
+    - "try the bigger model"
+    - "bad code"
+    - "switch to heavy"
+    - "go heavy"
+  
+  # Force devel triggers
+  force_devel_triggers:
+    - "force devel"
+    - "use devel"
+    - "prefer devel"
+  
+  # Clear triggers
+  clear_triggers:
+    - "back to auto"
+    - "clear ripcord"
+    - "return to autoroute"
+    - "de-escalate"
+
+# Research mode
+research:
+  preamble: "State assumptions. Verify dates. If unsure, say so. Cite sources if available. Don't guess."
+
+# Logging
+logging:
+  # Log routing decisions
+  log_decisions: true
+  
+  # Log full requests/responses (warning: verbose)
+  log_payloads: false
+  
+  # Log file (optional, comment out to log to stdout only)
+  # file: "/var/log/autoroute/autoroute.log"
