@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# cluster_config.sh
+
+declare -gA NODES=(
+  [1]="192.168.2.42:magnesium:10.10.10.1"
+  [2]="192.168.2.43:aluminium:10.10.10.2"
+  [3]="192.168.2.44:silicon:10.10.10.3"
+  [4]="192.168.2.45:phosphorus:10.10.10.4"
+)
+
+declare -gA MODELS=(
+  [qwen3-vl-235b]="
+    MODEL_DIR=/opt/ai-models/hf/qwen3/Qwen3-VL-235B-A22B-Thinking-AWQ
+    SERVED_MODEL_NAME=chat-heavy
+    TENSOR_PARALLEL_SIZE=2
+    QUANTIZATION=awq_marlin
+    MAX_MODEL_LEN=200000
+    MAX_NUM_SEQS=2
+    GPU_MEMORY_UTILIZATION=0.90
+    ENABLE_PREFIX_CACHING=0
+    ENABLE_CHUNKED_PREFILL=1
+    KV_CACHE_DTYPE=auto
+    TRUST_REMOTE_CODE=1
+    ENABLE_AUTO_TOOL_CHOICE=1
+    TOOL_CALL_PARSER=hermes
+    VLLM_PORT=8000
+    RAY_OBJECT_STORE_GB=2
+    ENFORCE_EAGER=0
+  "
+  
+  [deepseek-v3]="
+    MODEL_DIR=/opt/ai-models/hf/DeepSeek-V3-AWQ
+    SERVED_MODEL_NAME=chat-heavy
+    TENSOR_PARALLEL_SIZE=4
+    QUANTIZATION=awq
+    MAX_MODEL_LEN=163840
+    MAX_NUM_SEQS=2
+    GPU_MEMORY_UTILIZATION=0.90
+    ENABLE_PREFIX_CACHING=1
+    ENABLE_CHUNKED_PREFILL=1
+    KV_CACHE_DTYPE=fp8
+    TRUST_REMOTE_CODE=1
+    ENABLE_AUTO_TOOL_CHOICE=1
+    TOOL_CALL_PARSER=hermes
+    VLLM_PORT=8000
+    RAY_OBJECT_STORE_GB=2
+  "
+  
+  [deepseek-r1]="
+    MODEL_DIR=/opt/ai-models/hf/DeepSeek-R1-AWQ
+    SERVED_MODEL_NAME=chat-heavy
+    TENSOR_PARALLEL_SIZE=4
+    QUANTIZATION=awq
+    MAX_MODEL_LEN=163840
+    MAX_NUM_SEQS=2
+    GPU_MEMORY_UTILIZATION=0.90
+    ENABLE_PREFIX_CACHING=1
+    ENABLE_CHUNKED_PREFILL=1
+    KV_CACHE_DTYPE=fp8
+    TRUST_REMOTE_CODE=1
+    ENABLE_AUTO_TOOL_CHOICE=1
+    TOOL_CALL_PARSER=hermes
+    VLLM_PORT=8000
+    RAY_OBJECT_STORE_GB=2
+  "
+  
+  [qwen3.5-122b]="
+    MODEL_DIR=/opt/ai-models/hf/Qwen3.5-122B-AWQ
+    SERVED_MODEL_NAME=chat-heavy
+    TENSOR_PARALLEL_SIZE=2
+    QUANTIZATION=awq
+    MAX_MODEL_LEN=131072
+    MAX_NUM_SEQS=2
+    GPU_MEMORY_UTILIZATION=0.90
+    ENABLE_PREFIX_CACHING=1
+    ENABLE_CHUNKED_PREFILL=1
+    KV_CACHE_DTYPE=auto
+    TRUST_REMOTE_CODE=1
+    ENABLE_AUTO_TOOL_CHOICE=1
+    TOOL_CALL_PARSER=hermes
+    VLLM_PORT=8000
+    RAY_OBJECT_STORE_GB=4
+  "
+)
+
+VLLM_IMAGE="vllm/vllm-openai:latest"
+SSH_USER="admin"
+SSH_KEY=""
+LOG_DIR="/opt/ai-tools/logs/vllm-cluster"

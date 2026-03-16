@@ -1,0 +1,13 @@
+FROM nvcr.io/nvidia/pytorch:24.11-py3
+
+# Install vLLM and dependencies
+RUN pip install --upgrade pip && \
+    pip install vllm==0.17.1 && \
+    pip install ray==2.54.0
+
+# Verify installation
+RUN python -c "import vllm; print(f'vLLM {vllm.__version__} installed')" && \
+    python -c "from vllm._C import ops; print('CUDA kernels loaded')"
+
+WORKDIR /opt
+CMD ["sleep", "infinity"]
