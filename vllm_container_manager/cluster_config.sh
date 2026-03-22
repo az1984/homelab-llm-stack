@@ -28,8 +28,8 @@ declare -gA MODELS=(
     ENFORCE_EAGER=0
   "
   
-  [deepseek-v3]="
-    MODEL_DIR=/opt/ai-models/hf/DeepSeek-V3-AWQ
+  [deepseek-v3-future]="
+    MODEL_DIR=/opt/ai-models/hf/QuantTrio/DeepSeek-V3.2-AWQ
     SERVED_MODEL_NAME=chat-heavy
     TENSOR_PARALLEL_SIZE=4
     QUANTIZATION=awq
@@ -45,7 +45,7 @@ declare -gA MODELS=(
     VLLM_PORT=8000
     RAY_OBJECT_STORE_GB=2
   "
-  
+
   [deepseek-r1]="
     MODEL_DIR=/opt/ai-models/hf/DeepSeek-R1-AWQ
     SERVED_MODEL_NAME=chat-heavy
