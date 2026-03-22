@@ -83,7 +83,12 @@ declare -gA MODELS=(
   "
 )
 
-VLLM_IMAGE="vllm/vllm-openai:latest"
+# Docker image - PINNED to tested version
+# DO NOT use :latest - pin to specific version for production stability
+# Tested versions:
+#   v0.17.1 - Tested 2026-03-15, works with Qwen3-VL-235B AWQ, Grace Hopper ARM
+VLLM_IMAGE="vllm/vllm-openai:v0.17.1"
+
 SSH_USER="admin"
 SSH_KEY=""
 LOG_DIR="/opt/ai-tools/logs/vllm-cluster"
