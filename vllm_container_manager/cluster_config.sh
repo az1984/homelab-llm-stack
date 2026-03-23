@@ -12,7 +12,8 @@ declare -gA NODES=(
 # Add new images here, then reference them in model profiles via DOCKER_IMAGE=name
 declare -gA CUSTOM_IMAGES=(
   [vllm-official]="vllm/vllm-openai:v0.17.1"
-  [vllm-gb10-community]="hellohal2064/vllm-dgx-spark-gb10:latest"
+  [vllm-gb10-community]="scitrera/dgx-spark-vllm:0.14.0rc2-t5"
+  [vllm-gb10-old]="hellohal2064/vllm-dgx-spark-gb10:latest"
   [vllm-nvidia-official]="nvcr.io/nvidia/vllm:25.09-py3"
 )
 
