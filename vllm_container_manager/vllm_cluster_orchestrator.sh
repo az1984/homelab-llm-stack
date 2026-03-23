@@ -133,7 +133,7 @@ cmd_load_model() {
   Log "Loading model profile: ${profile}"
   
   # Parse model config
-  local model_config="${MODELS[$profile]}"
+  local model_config="${MODELS[$profile]:-}"
   [[ -n "${model_config}" ]] || { Log "ERROR: Unknown profile '${profile}'"; exit 1; }
   
   # Extract settings
@@ -276,7 +276,7 @@ Image Selection:
   
   Current images:
     vllm-official        - vllm/vllm-openai:v0.17.1 (proven for Qwen3-VL-235B)
-    vllm-gb10-community  - hellohal2064/vllm-dgx-spark-gb10:latest (for DeepSeek-V3.2, R1, Qwen3.5)
+    vllm-gb10-community  - scitrera/dgx-spark-vllm:0.14.0rc2-t5 (for DeepSeek-V3, R1, Qwen3.5)
     vllm-nvidia-official - nvcr.io/nvidia/vllm:25.09-py3
 
 Examples:
@@ -284,9 +284,9 @@ Examples:
   ./vllm_cluster_orchestrator.sh --nodes 1,2 start-cluster 2 qwen3-vl-235b
   ./vllm_cluster_orchestrator.sh --nodes 1,2 load-model qwen3-vl-235b
   
-  # DeepSeek-V3 on all 4 nodes (uses GB10 community image with newer vLLM)
-  ./vllm_cluster_orchestrator.sh start-cluster 4 deepseek-v3
-  ./vllm_cluster_orchestrator.sh load-model deepseek-v3
+  # DeepSeek-V3-dense on all 4 nodes (uses GB10 community image with newer vLLM)
+  ./vllm_cluster_orchestrator.sh start-cluster 4 deepseek-v3-dense
+  ./vllm_cluster_orchestrator.sh load-model deepseek-v3-dense
 
   # Qwen3.5-122B on nodes 3-4 (uses GB10 community image)
   ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster 2 qwen3.5-122b
