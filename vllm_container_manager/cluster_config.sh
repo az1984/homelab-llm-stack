@@ -8,8 +8,17 @@ declare -gA NODES=(
   [4]="192.168.2.45:phosphorus:10.10.10.4"
 )
 
+# Custom Docker images - map name to full image path
+# Add new images here, then reference them in model profiles via DOCKER_IMAGE=name
+declare -gA CUSTOM_IMAGES=(
+  [vllm-official]="vllm/vllm-openai:v0.17.1"
+  [vllm-gb10-community]="hellohal2064/vllm-dgx-spark-gb10:latest"
+  [vllm-nvidia-official]="nvcr.io/nvidia/vllm:25.09-py3"
+)
+
 declare -gA MODELS=(
   [qwen3-vl-235b]="
+    DOCKER_IMAGE=vllm-official
     MODEL_DIR=/opt/ai-models/hf/qwen3/Qwen3-VL-235B-A22B-Thinking-AWQ
     SERVED_MODEL_NAME=chat-heavy
     TENSOR_PARALLEL_SIZE=2
@@ -29,6 +38,7 @@ declare -gA MODELS=(
   "
   
   [deepseek-v3]="
+    DOCKER_IMAGE=vllm-gb10-community
     MODEL_DIR=/opt/ai-models/hf/QuantTrio/DeepSeek-V3.2-AWQ
     SERVED_MODEL_NAME=chat-heavy
     TENSOR_PARALLEL_SIZE=4
@@ -48,6 +58,7 @@ declare -gA MODELS=(
   "
   
   [deepseek-v3-future]="
+    DOCKER_IMAGE=vllm-gb10-community
     MODEL_DIR=/opt/ai-models/hf/QuantTrio/DeepSeek-V3.2-AWQ
     SERVED_MODEL_NAME=chat-heavy
     TENSOR_PARALLEL_SIZE=4
@@ -66,6 +77,7 @@ declare -gA MODELS=(
   "
 
   [deepseek-r1]="
+    DOCKER_IMAGE=vllm-gb10-community
     MODEL_DIR=/opt/ai-models/hf/DeepSeek-R1-AWQ
     SERVED_MODEL_NAME=chat-heavy
     TENSOR_PARALLEL_SIZE=4
@@ -84,6 +96,7 @@ declare -gA MODELS=(
   "
   
   [qwen3.5-122b]="
+    DOCKER_IMAGE=vllm-gb10-community
     MODEL_DIR=/opt/ai-models/hf/Qwen3.5-122B-AWQ
     SERVED_MODEL_NAME=chat-heavy
     TENSOR_PARALLEL_SIZE=2
@@ -102,11 +115,8 @@ declare -gA MODELS=(
   "
 )
 
-# Docker image - PINNED to tested version
-# DO NOT use :latest - pin to specific version for production stability
-# Tested versions:
-#   v0.17.1 - Tested 2026-03-15, works with Qwen3-VL-235B AWQ, Grace Hopper ARM
-VLLM_IMAGE="vllm/vllm-openai:v0.17.1"
+# Default image if model profile doesn't specify DOCKER_IMAGE
+DEFAULT_VLLM_IMAGE="vllm-official"
 
 SSH_USER="admin"
 SSH_KEY=""

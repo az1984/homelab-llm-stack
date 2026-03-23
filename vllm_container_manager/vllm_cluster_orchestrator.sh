@@ -37,21 +37,26 @@ get_node_info() {
 
 ensure_container() {
   local node_num=$1
+  local image_name=${2:-$DEFAULT_VLLM_IMAGE}  # Use default if not specified
   
   # Skip if not in active nodes
   is_node_active $node_num || { Log "Skipping node $node_num (filtered)"; return 0; }
+  
+  # Resolve image name to full path
+  local image_path="${CUSTOM_IMAGES[$image_name]:-$image_name}"
   
   local node_name=$(get_node_info $node_num name)
   local node_ip=$(get_node_info $node_num lan_ip)
   local fabric_ip=$(get_node_info $node_num fabric_ip)
 
   Log "Ensuring container on node ${node_num} (${node_name} @ ${node_ip})"
+  Log "  Using image: ${image_name} → ${image_path}"
 
   # Remove old container if exists
   ssh admin@${node_ip} "sudo docker rm -f vllm-node-${node_num} 2>/dev/null || true"
 
   # Pull image
-  ssh admin@${node_ip} "sudo docker pull ${VLLM_IMAGE}"
+  ssh admin@${node_ip} "sudo docker pull ${image_path}"
 
   # Copy the manager script to the node
   scp vllm_cluster_mgr.sh admin@${node_ip}:/tmp/vllm_cluster_mgr.sh
@@ -76,7 +81,7 @@ ensure_container() {
     -v /opt/ai-tools/run:/opt/ai-tools/run \
     -v /tmp/vllm_cluster_mgr.sh:/opt/vllm_cluster.sh:ro \
     --entrypoint /bin/bash \
-    ${VLLM_IMAGE} \
+    ${image_path} \
     -c 'sleep infinity'"
 
   Log "  Container started"
@@ -84,6 +89,7 @@ ensure_container() {
 
 cmd_start_cluster() {
   local num_nodes=${1:-2}
+  local profile=${2:-}  # Optional: pre-load model profile to get image
   
   Log "=== Starting ${num_nodes}-node cluster ==="
   
@@ -92,9 +98,20 @@ cmd_start_cluster() {
   else
     Log "All nodes 1-${num_nodes} will be used"
   fi
+  
+  # Determine which image to use
+  local image_name=$DEFAULT_VLLM_IMAGE
+  if [[ -n "$profile" ]]; then
+    local model_config="${MODELS[$profile]}"
+    if [[ -n "${model_config}" ]]; then
+      local docker_image=$(echo "$model_config" | grep "DOCKER_IMAGE=" | cut -d'=' -f2 | xargs)
+      [[ -n "$docker_image" ]] && image_name="$docker_image"
+      Log "Using image from profile '${profile}': ${image_name}"
+    fi
+  fi
 
   for i in $(seq 1 ${num_nodes}); do
-    ensure_container ${i}
+    ensure_container ${i} "${image_name}"
   done
 
   Log "Containers ready. Use load-model to start cluster with model-specific Ray settings."
@@ -243,42 +260,51 @@ if [[ -z "$COMMAND" ]]; then
 Usage: ./vllm_cluster_orchestrator.sh [--nodes N,M,...] <command> [args]
 
 Commands:
-  start-cluster N    - Start N-node cluster (default: 2)
-  load-model PROFILE - Load model from cluster_config.sh
-  stop-model         - Stop vLLM (keep Ray + containers)
-  status             - Show cluster status
-  stop-cluster       - Stop all containers
+  start-cluster N [PROFILE]  - Start N-node cluster (optionally pre-configure for PROFILE)
+  load-model PROFILE         - Load model from cluster_config.sh
+  stop-model                 - Stop vLLM (keep Ray + containers)
+  status                     - Show cluster status
+  stop-cluster               - Stop all containers
 
 Node Filtering:
   --nodes 1,2        - Only use nodes 1 and 2
   --nodes 3,4        - Only use nodes 3 and 4
-  --nodes 1,3,4      - Only use nodes 1, 3, and 4
+
+Image Selection:
+  Each model profile in cluster_config.sh can specify DOCKER_IMAGE=name
+  Images are defined in CUSTOM_IMAGES map in cluster_config.sh
+  
+  Current images:
+    vllm-official        - vllm/vllm-openai:v0.17.1 (proven for Qwen3-VL-235B)
+    vllm-gb10-community  - hellohal2064/vllm-dgx-spark-gb10:latest (for DeepSeek-V3.2, R1, Qwen3.5)
+    vllm-nvidia-official - nvcr.io/nvidia/vllm:25.09-py3
 
 Examples:
-  # Two instances of Qwen3-VL-235B on different node pairs
-  ./vllm_cluster_orchestrator.sh --nodes 1,2 start-cluster 2
+  # Qwen3-VL-235B on nodes 1-2 (uses proven v0.17.1 image)
+  ./vllm_cluster_orchestrator.sh --nodes 1,2 start-cluster 2 qwen3-vl-235b
   ./vllm_cluster_orchestrator.sh --nodes 1,2 load-model qwen3-vl-235b
   
-  ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster 2
-  ./vllm_cluster_orchestrator.sh --nodes 3,4 load-model qwen3-vl-235b
-  # Now you have two separate Qwen3-VL-235B instances!
-
-  # Full 4-node cluster for DeepSeek-V3
-  ./vllm_cluster_orchestrator.sh start-cluster 4
+  # DeepSeek-V3 on all 4 nodes (uses GB10 community image with newer vLLM)
+  ./vllm_cluster_orchestrator.sh start-cluster 4 deepseek-v3
   ./vllm_cluster_orchestrator.sh load-model deepseek-v3
 
-  # Qwen3.5-122B on nodes 3-4 only
-  ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster 2
+  # Qwen3.5-122B on nodes 3-4 (uses GB10 community image)
+  ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster 2 qwen3.5-122b
   ./vllm_cluster_orchestrator.sh --nodes 3,4 load-model qwen3.5-122b
 
-  # Stop specific subset
-  ./vllm_cluster_orchestrator.sh --nodes 1,2 stop-cluster
+  # Run both simultaneously on different node pairs:
+  ./vllm_cluster_orchestrator.sh --nodes 1,2 start-cluster 2 qwen3-vl-235b
+  ./vllm_cluster_orchestrator.sh --nodes 1,2 load-model qwen3-vl-235b
+  
+  ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster 2 qwen3.5-122b
+  ./vllm_cluster_orchestrator.sh --nodes 3,4 load-model qwen3.5-122b
+  # Now you have both running!
 USAGE
   exit 1
 fi
 
 case "$COMMAND" in
-  start-cluster) cmd_start_cluster "${ARGS[0]:-2}" ;;
+  start-cluster) cmd_start_cluster "${ARGS[0]:-2}" "${ARGS[1]:-}" ;;
   load-model) cmd_load_model "${ARGS[0]}" ;;
   stop-model) cmd_stop_model ;;
   status) cmd_status ;;
