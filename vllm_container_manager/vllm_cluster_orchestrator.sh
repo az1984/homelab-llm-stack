@@ -102,7 +102,7 @@ cmd_start_cluster() {
   # Determine which image to use
   local image_name=$DEFAULT_VLLM_IMAGE
   if [[ -n "$profile" ]]; then
-    local model_config="${MODELS[$profile]}"
+    local model_config="${MODELS[$profile]:-}"
     if [[ -n "${model_config}" ]]; then
       local docker_image=$(echo "$model_config" | grep "DOCKER_IMAGE=" | cut -d'=' -f2 | xargs)
       [[ -n "$docker_image" ]] && image_name="$docker_image"
