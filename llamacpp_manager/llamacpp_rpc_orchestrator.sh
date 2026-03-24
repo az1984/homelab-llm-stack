@@ -87,7 +87,7 @@ BuildLlamaCppArgs() {
     # Map semantic → llama.cpp flags
     [[ -n "${CONTEXT_SIZE:-}" ]] && args+=" --ctx-size ${CONTEXT_SIZE}"
     [[ -n "${MAX_CONCURRENCY:-}" ]] && args+=" --parallel ${MAX_CONCURRENCY}"
-    [[ -n "${ENABLE_PREFIX_CACHE:-}" ]] && [[ "${ENABLE_PREFIX_CACHE}" == "1" ]] && args+=" --cache-prompt"
+    # Note: Prefix caching is automatic in llama.cpp - no flag needed
   fi
   
   # Load runtime-specific options
