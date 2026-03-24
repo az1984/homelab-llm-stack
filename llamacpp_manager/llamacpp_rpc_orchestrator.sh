@@ -166,10 +166,20 @@ CheckLlamaBinaries() {
 # RUNS: Locally (but starts process on remote via SSH)
 StartWorkerNode() {
   local node_name="$1"
-  local node_ip="$2"
+  local node_ip="$2"  # Management IP for SSH
+  local rdma_ip=""
   local log_file="${LLAMA_RPC_LOG_DIR}/${node_name}_rpc_server.log"
   
-  Log "Starting RPC server on ${node_name} (${node_ip})..."
+  # Map node name to RDMA IP
+  case "$node_name" in
+    magnesium) rdma_ip="10.10.10.1" ;;
+    aluminium) rdma_ip="10.10.10.2" ;;
+    silicon)   rdma_ip="10.10.10.3" ;;
+    phosphorus) rdma_ip="10.10.10.4" ;;
+    *) Die "Unknown node name: $node_name" ;;
+  esac
+  
+  Log "Starting RPC server on ${node_name} (${node_ip}, RDMA: ${rdma_ip})..."
   
   # Check if already running (REMOTE CHECK)
   if SSHExec "$node_ip" "pgrep -f rpc-server" >/dev/null 2>&1; then
@@ -177,12 +187,12 @@ StartWorkerNode() {
     return 0
   fi
   
-  # Start RPC server via SSH (RUNS ON REMOTE)
+  # Start RPC server via SSH - bind to 100G RDMA IP only
   SSHExec "$node_ip" "
     sudo mkdir -p ${LLAMA_RPC_LOG_DIR}
     sudo chown ${SSH_USER}:${SSH_USER} ${LLAMA_RPC_LOG_DIR}
     nohup ${LLAMA_RPC_SERVER} \
-      -H 0.0.0.0 \
+      -H ${rdma_ip} \
       -p ${LLAMA_RPC_PORT} \
       -t 64 \
       --cache \
@@ -195,7 +205,7 @@ StartWorkerNode() {
   
   # Verify it's running (REMOTE CHECK)
   if SSHExec "$node_ip" "pgrep -f rpc-server" >/dev/null 2>&1; then
-    Log "  ✓ RPC server started on ${node_name}"
+    Log "  ✓ RPC server started on ${node_name} (listening on ${rdma_ip}:${LLAMA_RPC_PORT})"
   else
     Log "  ✗ RPC server failed to start on ${node_name}"
     Log "    Check log: ssh ${SSH_USER}@${node_ip} tail -50 ${log_file}"
@@ -233,19 +243,19 @@ StartAllWorkers() {
 # RUNS: Locally (just builds a string)
 BuildRPCEndpoints() {
   local endpoints=()
-  local ip=""
+  local rdma_ip=""
   
   if [[ "$MODE" == "remote" ]]; then
-    # Remote mode: All 4 nodes are RPC workers
-    endpoints+=("${MASTER_IP}:${LLAMA_RPC_PORT}")
-    for ip in "${WORKER_IPS[@]}"; do
-      endpoints+=("${ip}:${LLAMA_RPC_PORT}")
-    done
+    # Remote mode: All 4 nodes are RPC workers - use 100G RDMA IPs
+    endpoints+=("10.10.10.1:${LLAMA_RPC_PORT}")  # magnesium RDMA
+    endpoints+=("10.10.10.2:${LLAMA_RPC_PORT}")  # aluminium RDMA
+    endpoints+=("10.10.10.3:${LLAMA_RPC_PORT}")  # silicon RDMA
+    endpoints+=("10.10.10.4:${LLAMA_RPC_PORT}")  # phosphorus RDMA
   else
-    # Cluster mode: Only nodes 2-4 are RPC workers
-    for ip in "${WORKER_IPS[@]}"; do
-      endpoints+=("${ip}:${LLAMA_RPC_PORT}")
-    done
+    # Cluster mode: Only nodes 2-4 are RPC workers - use 100G RDMA IPs
+    endpoints+=("10.10.10.2:${LLAMA_RPC_PORT}")  # aluminium RDMA
+    endpoints+=("10.10.10.3:${LLAMA_RPC_PORT}")  # silicon RDMA
+    endpoints+=("10.10.10.4:${LLAMA_RPC_PORT}")  # phosphorus RDMA
   fi
   
   # Join with commas
