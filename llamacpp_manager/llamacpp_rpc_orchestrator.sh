@@ -69,18 +69,13 @@ source "${CONFIG_FILE}"
 # llama.cpp RPC Specific Configuration
 # ============================================================================
 
-# Binary paths
+# Binary paths (on remote nodes)
 LLAMA_RPC_SERVER="${LLAMA_CPP_RPC_BIN}/rpc-server"
 LLAMA_CLI="${LLAMA_CPP_RPC_BIN}/llama-cli"
 LLAMA_SERVER="${LLAMA_CPP_RPC_BIN}/llama-server"
 
 # BuildLlamaCppArgs - Merge MODEL_OPTS + LLAMA_RUNTIME into command-line args
-#
-# Arguments:
-#   $1 - model_profile (string)
-# Outputs: Command-line arguments string
-# Returns: 0 on success
-# Globals: Reads MODEL_OPTS, LLAMA_RUNTIME
+# RUNS: Locally (just builds a string)
 BuildLlamaCppArgs() {
   local profile="$1"
   local args=""
@@ -110,52 +105,33 @@ BuildLlamaCppArgs() {
   echo "$args"
 }
 
-
 # ============================================================================
 # Utility Functions
 # ============================================================================
 
 # Log - Write timestamped log message
-#
-# Arguments: All message components ($@)
-# Outputs: Timestamped message to stdout
-# Returns: 0 (always succeeds)
-# Globals: None
+# RUNS: Locally
 Log() {
   echo "[$(date +'%FT%T')] $*"
 }
 
 # Die - Write error and exit
-#
-# Arguments: All error message components ($@)
-# Outputs: Error to stderr
-# Returns: Exits with code 1
-# Globals: None
+# RUNS: Locally
 Die() {
   echo "[$(date +'%FT%T')] ERROR: $*" >&2
   exit 1
 }
 
 # SSHExec - Execute command on remote node
-#
-# Arguments:
-#   $1 - node_ip (string)
-#   $@ - command to execute
-# Outputs: Command output to stdout
-# Returns: Command exit code
-# Globals: Reads SSH_USER, SSH_OPTS
+# RUNS: Locally (but executes on remote)
 SSHExec() {
   local node_ip="$1"
   shift
   ssh ${SSH_OPTS} "${SSH_USER}@${node_ip}" "$@"
 }
 
-# CheckLlamaBinaries - Verify llama.cpp binaries exist on cluster nodes
-#
-# Arguments: None
-# Outputs: Warning if run from non-cluster machine
-# Returns: 0 (checks happen on remote nodes during execution)
-# Globals: Reads MASTER_NODE, WORKER_NODES
+# CheckLlamaBinaries - Verify llama.cpp binaries exist
+# RUNS: Locally (checks local binaries if on cluster node, otherwise just warns)
 CheckLlamaBinaries() {
   local hostname=""
   hostname=$(hostname)
@@ -175,7 +151,7 @@ CheckLlamaBinaries() {
   else
     # We're on a cluster node, verify local binaries
     if [[ ! -x "$LLAMA_RPC_SERVER" ]]; then
-      Die "llama-rpc-server not found at $LLAMA_RPC_SERVER on $hostname"
+      Die "rpc-server not found at $LLAMA_RPC_SERVER on $hostname"
     fi
     
     if [[ ! -x "$LLAMA_CLI" ]] && [[ ! -x "$LLAMA_SERVER" ]]; then
@@ -187,30 +163,21 @@ CheckLlamaBinaries() {
 }
 
 # StartWorkerNode - Start RPC server on a worker node
-#
-# Arguments:
-#   $1 - node_name (string)
-#   $2 - node_ip (string)
-# Outputs: Status messages via Log
-# Returns: 0 on success, non-zero on failure
-# Globals: Reads RPC_PORT, WORKER_MEMORY, LOG_DIR
+# RUNS: Locally (but starts process on remote via SSH)
 StartWorkerNode() {
   local node_name="$1"
   local node_ip="$2"
-  local log_file=""
-  
-  log_file="${LLAMA_RPC_LOG_DIR}/${node_name}_rpc_server.log"
+  local log_file="${LLAMA_RPC_LOG_DIR}/${node_name}_rpc_server.log"
   
   Log "Starting RPC server on ${node_name} (${node_ip})..."
   
-  # Check if already running
+  # Check if already running (REMOTE CHECK)
   if SSHExec "$node_ip" "pgrep -f rpc-server" >/dev/null 2>&1; then
     Log "  RPC server already running on ${node_name}"
     return 0
   fi
   
-  # Start RPC server via SSH
-  # Use nohup to persist after SSH disconnect
+  # Start RPC server via SSH (RUNS ON REMOTE)
   SSHExec "$node_ip" "
     sudo mkdir -p ${LLAMA_RPC_LOG_DIR}
     sudo chown ${SSH_USER}:${SSH_USER} ${LLAMA_RPC_LOG_DIR}
@@ -226,8 +193,8 @@ StartWorkerNode() {
   # Wait for server to start
   sleep 2
   
-  # Verify it's running
-  if SSHExec "$node_ip" "pgrep -f llama-rpc-server" >/dev/null 2>&1; then
+  # Verify it's running (REMOTE CHECK)
+  if SSHExec "$node_ip" "pgrep -f rpc-server" >/dev/null 2>&1; then
     Log "  ✓ RPC server started on ${node_name}"
   else
     Log "  ✗ RPC server failed to start on ${node_name}"
@@ -237,11 +204,7 @@ StartWorkerNode() {
 }
 
 # StartAllWorkers - Start RPC servers on worker nodes
-#
-# Arguments: None
-# Outputs: Progress via Log
-# Returns: 0 (always succeeds, individual failures logged)
-# Globals: Reads MODE, MASTER_NODE, MASTER_IP, WORKER_NODES, WORKER_IPS
+# RUNS: Locally (orchestrates remote starts)
 StartAllWorkers() {
   local i=0
   local nodes_to_start=()
@@ -267,11 +230,7 @@ StartAllWorkers() {
 }
 
 # BuildRPCEndpoints - Build --rpc argument for llama-cli
-#
-# Arguments: None
-# Outputs: Comma-separated RPC endpoints to stdout
-# Returns: 0 (always succeeds)
-# Globals: Reads MODE, MASTER_IP, WORKER_IPS, LLAMA_RPC_PORT
+# RUNS: Locally (just builds a string)
 BuildRPCEndpoints() {
   local endpoints=()
   local ip=""
@@ -294,14 +253,10 @@ BuildRPCEndpoints() {
   echo "${endpoints[*]}"
 }
 
-# StartMaster - Start master node inference (interactive or server mode)
-#
-# Arguments:
-#   $1 - model_profile (string)
-#   $2 - mode (optional: "cli" or "server", default: cli)
-# Outputs: Delegates to llama-cli or llama-server
-# Returns: Exit code from llama binary
-# Globals: Reads LLAMA_MODELS, MODEL_OPTS, LLAMA_RUNTIME
+# StartMaster - Start master node inference
+# RUNS: Depends on mode
+#   - cluster mode: Must run on master node (local execution)
+#   - remote mode: SSH to master node and exec there
 StartMaster() {
   local profile="$1"
   local mode="${2:-cli}"
@@ -312,11 +267,6 @@ StartMaster() {
   
   hostname=$(hostname)
   
-  # Verify we're on master node
-  if [[ "$hostname" != "$MASTER_NODE" ]]; then
-    Die "Master must run on ${MASTER_NODE}, currently on ${hostname}"
-  fi
-  
   # Verify model profile exists
   if [[ -z "${LLAMA_MODELS[$profile]:-}" ]]; then
     Die "Unknown model profile: $profile. Available: ${!LLAMA_MODELS[*]}"
@@ -324,84 +274,131 @@ StartMaster() {
   
   model_path="${LLAMA_MODELS[$profile]}"
   llama_args=$(BuildLlamaCppArgs "$profile")
-  
-  # Verify model file exists
-  if [[ ! -f "$model_path" ]]; then
-    Die "Model file not found: $model_path"
-  fi
-  
-  # Build RPC endpoints
   rpc_endpoints=$(BuildRPCEndpoints)
   
-  Log "Starting master on ${MASTER_NODE}"
-  Log "  Model: ${model_path}"
-  Log "  Profile: ${profile}"
-  Log "  RPC workers: ${rpc_endpoints}"
-  Log "  Mode: ${mode}"
-  
-  case "$mode" in
-    cli)
-      # Interactive CLI mode
-      Log "Starting llama-cli in interactive mode..."
-      Log "Type your prompt and press Enter. Ctrl+C to exit."
-      
-      # shellcheck disable=SC2086
-      exec "$LLAMA_CLI" \
-        --model "$model_path" \
-        --rpc "$rpc_endpoints" \
-        $llama_args \
-        --interactive
-      ;;
-      
-    server)
-      # OpenAI-compatible API server mode
-      local port="${LLAMA_SERVER_PORT:-8080}"
-      
-      Log "Starting llama-server on port ${port}..."
-      Log "OpenAI-compatible API at: http://${MASTER_IP}:${port}/v1"
-      
-      # shellcheck disable=SC2086
-      exec "$LLAMA_SERVER" \
-        --model "$model_path" \
-        --rpc "$rpc_endpoints" \
-        $llama_args \
-        --host 0.0.0.0 \
-        --port "$port"
-      ;;
-      
-    *)
-      Die "Invalid mode: $mode (must be 'cli' or 'server')"
-      ;;
-  esac
+  # In remote mode, SSH to master node and exec there
+  if [[ "$MODE" == "remote" ]]; then
+    if [[ "$hostname" == "$MASTER_NODE" ]]; then
+      Die "Already on master node - don't use --mode remote when running from the cluster"
+    fi
+    
+    Log "Connecting to master node (${MASTER_NODE}) and starting inference..."
+    Log "Model: ${model_path}"
+    Log "Profile: ${profile}"
+    Log "RPC workers: ${rpc_endpoints}"
+    Log "Mode: ${mode}"
+    
+    case "$mode" in
+      cli)
+        # Interactive mode - need terminal passthrough
+        SSHExec "${MASTER_IP}" "
+          ${LLAMA_CLI} \
+            --model ${model_path} \
+            --rpc ${rpc_endpoints} \
+            ${llama_args} \
+            --interactive
+        "
+        ;;
+      server)
+        # Server mode - run in background on remote
+        local port="${LLAMA_SERVER_PORT:-8080}"
+        Log "Starting llama-server on ${MASTER_NODE}:${port}..."
+        Log "OpenAI-compatible API at: http://${MASTER_IP}:${port}/v1"
+        
+        SSHExec "${MASTER_IP}" "
+          sudo mkdir -p ${LLAMA_RPC_LOG_DIR}
+          nohup ${LLAMA_SERVER} \
+            --model ${model_path} \
+            --rpc ${rpc_endpoints} \
+            ${llama_args} \
+            --host 0.0.0.0 \
+            --port ${port} \
+            > ${LLAMA_RPC_LOG_DIR}/master_server.log 2>&1 &
+          echo \$! > ${LLAMA_RPC_LOG_DIR}/master_server.pid
+        "
+        Log "Server started on ${MASTER_NODE}"
+        ;;
+      *)
+        Die "Invalid mode: $mode (must be 'cli' or 'server')"
+        ;;
+    esac
+    
+  else
+    # Cluster mode: verify we're on master node and exec locally
+    if [[ "$hostname" != "$MASTER_NODE" ]]; then
+      Die "Master must run on ${MASTER_NODE}, currently on ${hostname}"
+    fi
+    
+    # Verify model file exists (LOCAL CHECK)
+    if [[ ! -f "$model_path" ]]; then
+      Die "Model file not found: $model_path"
+    fi
+    
+    Log "Starting master on ${MASTER_NODE}"
+    Log "  Model: ${model_path}"
+    Log "  Profile: ${profile}"
+    Log "  RPC workers: ${rpc_endpoints}"
+    Log "  Mode: ${mode}"
+    
+    case "$mode" in
+      cli)
+        # Interactive CLI mode (LOCAL EXEC)
+        Log "Starting llama-cli in interactive mode..."
+        Log "Type your prompt and press Enter. Ctrl+C to exit."
+        
+        # shellcheck disable=SC2086
+        exec "$LLAMA_CLI" \
+          --model "$model_path" \
+          --rpc "$rpc_endpoints" \
+          $llama_args \
+          --interactive
+        ;;
+        
+      server)
+        # OpenAI-compatible API server mode (LOCAL EXEC)
+        local port="${LLAMA_SERVER_PORT:-8080}"
+        
+        Log "Starting llama-server on port ${port}..."
+        Log "OpenAI-compatible API at: http://${MASTER_IP}:${port}/v1"
+        
+        # shellcheck disable=SC2086
+        exec "$LLAMA_SERVER" \
+          --model "$model_path" \
+          --rpc "$rpc_endpoints" \
+          $llama_args \
+          --host 0.0.0.0 \
+          --port "$port"
+        ;;
+        
+      *)
+        Die "Invalid mode: $mode (must be 'cli' or 'server')"
+        ;;
+    esac
+  fi
 }
 
 # StopWorkerNode - Stop RPC server on a worker node
-#
-# Arguments:
-#   $1 - node_name (string)
-#   $2 - node_ip (string)
-# Outputs: Status messages via Log
-# Returns: 0 (always succeeds)
-# Globals: Reads LOG_DIR
+# RUNS: Locally (but stops process on remote via SSH)
 StopWorkerNode() {
   local node_name="$1"
   local node_ip="$2"
   
   Log "Stopping RPC server on ${node_name}..."
   
+  # RUNS ON REMOTE
   SSHExec "$node_ip" "
-    if pgrep -f llama-rpc-server >/dev/null 2>&1; then
-      pkill -f llama-rpc-server
+    if pgrep -f rpc-server >/dev/null 2>&1; then
+      pkill -f rpc-server
       sleep 1
       
       # Force kill if still running
-      if pgrep -f llama-rpc-server >/dev/null 2>&1; then
-        pkill -9 -f llama-rpc-server
+      if pgrep -f rpc-server >/dev/null 2>&1; then
+        pkill -9 -f rpc-server
       fi
       
-      echo '  ✓ Stopped RPC server on ${node_name}'
+      echo '  ✓ Stopped RPC server'
     else
-      echo '  RPC server not running on ${node_name}'
+      echo '  RPC server not running'
     fi
     
     # Clean up PID file
@@ -409,53 +406,76 @@ StopWorkerNode() {
   " || true
 }
 
-# StopAllWorkers - Stop RPC servers on all worker nodes
-#
-# Arguments: None
-# Outputs: Progress via Log
-# Returns: 0 (always succeeds)
-# Globals: Reads WORKER_NODES, WORKER_IPS
+# StopAllWorkers - Stop RPC servers on all nodes
+# RUNS: Locally (orchestrates remote stops)
 StopAllWorkers() {
   local i=0
+  local nodes_to_stop=()
+  local ips_to_stop=()
   
-  Log "Stopping RPC servers on all worker nodes..."
+  if [[ "$MODE" == "remote" ]]; then
+    # Remote mode: Stop ALL 4 nodes
+    Log "Stopping RPC servers on all 4 nodes (remote mode)..."
+    nodes_to_stop=("$MASTER_NODE" "${WORKER_NODES[@]}")
+    ips_to_stop=("$MASTER_IP" "${WORKER_IPS[@]}")
+  else
+    # Cluster mode: Stop nodes 2-4 only
+    Log "Stopping RPC servers on worker nodes (cluster mode)..."
+    nodes_to_stop=("${WORKER_NODES[@]}")
+    ips_to_stop=("${WORKER_IPS[@]}")
+  fi
   
-  for i in "${!WORKER_NODES[@]}"; do
-    StopWorkerNode "${WORKER_NODES[$i]}" "${WORKER_IPS[$i]}"
+  for i in "${!nodes_to_stop[@]}"; do
+    StopWorkerNode "${nodes_to_stop[$i]}" "${ips_to_stop[$i]}"
   done
   
   Log "Worker shutdown complete"
 }
 
 # StopMaster - Stop master process
-#
-# Arguments: None
-# Outputs: Status via Log
-# Returns: 0 (always succeeds)
-# Globals: None
+# RUNS: Depends on mode
+#   - cluster mode: Must run on master node (local process kill)
+#   - remote mode: SSH to master and kill there
 StopMaster() {
   local hostname=""
   hostname=$(hostname)
   
-  Log "Stopping master processes on ${hostname}..."
-  
-  if pgrep -f "llama-cli.*--rpc" >/dev/null 2>&1; then
-    pkill -f "llama-cli.*--rpc"
-    Log "  ✓ Stopped llama-cli"
-  fi
-  
-  if pgrep -f "llama-server.*--rpc" >/dev/null 2>&1; then
-    pkill -f "llama-server.*--rpc"
-    Log "  ✓ Stopped llama-server"
+  if [[ "$MODE" == "remote" ]]; then
+    # Remote mode: SSH to master and kill
+    Log "Stopping master processes on ${MASTER_NODE}..."
+    
+    SSHExec "${MASTER_IP}" "
+      if pgrep -f 'llama-cli.*--rpc' >/dev/null 2>&1; then
+        pkill -f 'llama-cli.*--rpc'
+        echo '  ✓ Stopped llama-cli'
+      fi
+      
+      if pgrep -f 'llama-server.*--rpc' >/dev/null 2>&1; then
+        pkill -f 'llama-server.*--rpc'
+        echo '  ✓ Stopped llama-server'
+      fi
+      
+      rm -f ${LLAMA_RPC_LOG_DIR}/master_server.pid
+    " || true
+    
+  else
+    # Cluster mode: kill local processes
+    Log "Stopping master processes on ${hostname}..."
+    
+    if pgrep -f "llama-cli.*--rpc" >/dev/null 2>&1; then
+      pkill -f "llama-cli.*--rpc"
+      Log "  ✓ Stopped llama-cli"
+    fi
+    
+    if pgrep -f "llama-server.*--rpc" >/dev/null 2>&1; then
+      pkill -f "llama-server.*--rpc"
+      Log "  ✓ Stopped llama-server"
+    fi
   fi
 }
 
 # ShowStatus - Display cluster status
-#
-# Arguments: None
-# Outputs: Status table to stdout
-# Returns: 0 (always succeeds)
-# Globals: Reads all cluster configuration
+# RUNS: Mixed (local checks + remote SSH checks)
 ShowStatus() {
   local i=0
   local node_name=""
@@ -470,28 +490,65 @@ ShowStatus() {
   echo "  llama.cpp RPC Cluster Status"
   echo "═══════════════════════════════════════════════════════════════"
   echo ""
+  echo "Mode: ${MODE}"
   echo "Master Node: ${MASTER_NODE} (${MASTER_IP})"
   
-  if [[ "$hostname" == "$MASTER_NODE" ]]; then
-    if pgrep -f "llama-cli.*--rpc" >/dev/null 2>&1; then
-      echo "  Status: ✓ llama-cli running (interactive)"
-    elif pgrep -f "llama-server.*--rpc" >/dev/null 2>&1; then
-      echo "  Status: ✓ llama-server running (API mode)"
+  # Check master status (REMOTE CHECK in remote mode, LOCAL in cluster mode)
+  if [[ "$MODE" == "remote" ]] || [[ "$hostname" == "$MASTER_NODE" ]]; then
+    local master_status=""
+    
+    if [[ "$MODE" == "remote" ]]; then
+      master_status=$(SSHExec "${MASTER_IP}" "
+        if pgrep -f 'llama-cli.*--rpc' >/dev/null 2>&1; then
+          echo 'llama-cli'
+        elif pgrep -f 'llama-server.*--rpc' >/dev/null 2>&1; then
+          echo 'llama-server'
+        else
+          echo 'none'
+        fi
+      ")
     else
-      echo "  Status: ✗ No master process running"
+      if pgrep -f "llama-cli.*--rpc" >/dev/null 2>&1; then
+        master_status="llama-cli"
+      elif pgrep -f "llama-server.*--rpc" >/dev/null 2>&1; then
+        master_status="llama-server"
+      else
+        master_status="none"
+      fi
     fi
+    
+    case "$master_status" in
+      llama-cli)
+        echo "  Status: ✓ llama-cli running (interactive)"
+        ;;
+      llama-server)
+        echo "  Status: ✓ llama-server running (API mode)"
+        ;;
+      *)
+        echo "  Status: ✗ No master process running"
+        ;;
+    esac
   else
-    echo "  (Current node: ${hostname})"
+    echo "  (Running from: ${hostname})"
   fi
   
   echo ""
   echo "Worker Nodes:"
   
-  for i in "${!WORKER_NODES[@]}"; do
-    node_name="${WORKER_NODES[$i]}"
-    node_ip="${WORKER_IPS[$i]}"
+  # Check workers (always REMOTE via SSH)
+  local all_nodes=("$MASTER_NODE" "${WORKER_NODES[@]}")
+  local all_ips=("$MASTER_IP" "${WORKER_IPS[@]}")
+  
+  for i in "${!all_nodes[@]}"; do
+    node_name="${all_nodes[$i]}"
+    node_ip="${all_ips[$i]}"
     
-    if SSHExec "$node_ip" "pgrep -f llama-rpc-server" >/dev/null 2>&1; then
+    # Skip master in cluster mode
+    if [[ "$MODE" == "cluster" ]] && [[ "$node_name" == "$MASTER_NODE" ]]; then
+      continue
+    fi
+    
+    if SSHExec "$node_ip" "pgrep -f rpc-server" >/dev/null 2>&1; then
       worker_status="✓ Running"
     else
       worker_status="✗ Stopped"
@@ -503,13 +560,19 @@ ShowStatus() {
   echo ""
   echo "RPC Configuration:"
   echo "  Port: ${LLAMA_RPC_PORT}"
-  echo "  Worker memory: ${WORKER_MEMORY_MB}MB (per node)"
-  echo "  Total cluster memory: $((WORKER_MEMORY * ${#WORKER_NODES[@]} / 1024))GB"
+  echo "  Threads per worker: 64"
+  
+  if [[ "$MODE" == "remote" ]]; then
+    echo "  Active workers: 4 nodes"
+  else
+    echo "  Active workers: 3 nodes"
+  fi
+  
   echo ""
   echo "Available Models:"
   
-  for profile in "${!MODELS[@]}"; do
-    echo "  - $profile: ${LLAMA_MODELS[$profile]}"
+  for profile in "${!LLAMA_MODELS[@]}"; do
+    echo "  - $profile"
   done
   
   echo ""
@@ -517,72 +580,10 @@ ShowStatus() {
   echo ""
 }
 
-# ShowUsage - Display help text
-#
-# Arguments: None
-# Outputs: Usage text to stdout
-# Returns: Exits with code 0
-# Globals: None
-ShowUsage() {
-  cat <<'USAGE'
-Usage: llamacpp_rpc_orchestrator.sh <command> [options]
-
-Commands:
-  start-workers              Start RPC servers on all worker nodes
-  start-master <profile>     Start master inference (interactive CLI)
-  start-server <profile>     Start master as OpenAI API server
-  stop                       Stop all RPC servers and master
-  stop-workers               Stop only worker RPC servers
-  stop-master                Stop only master process
-  status                     Show cluster status
-  check-binaries             Verify llama.cpp binaries installed
-
-Model Profiles:
-  deepseek-v3-q4            DeepSeek-V3 Q4_K_M quantization (~340GB)
-  deepseek-v3-q5            DeepSeek-V3 Q5_K_M quantization (~420GB)
-
-Examples:
-  # Full cluster startup (run from master node):
-  ./llamacpp_rpc_orchestrator.sh start-workers
-  ./llamacpp_rpc_orchestrator.sh start-master deepseek-v3-q4
-
-  # API server mode:
-  ./llamacpp_rpc_orchestrator.sh start-server deepseek-v3-q4
-
-  # Shutdown:
-  ./llamacpp_rpc_orchestrator.sh stop
-
-  # Check status:
-  ./llamacpp_rpc_orchestrator.sh status
-
-Environment Variables:
-  LLAMA_SERVER_PORT         API server port (default: 8080)
-
-Logs:
-  Worker logs: /opt/ai-tools/logs/llama-rpc/<node>_rpc_server.log
-  
-Network:
-  Uses fabric network (10.10.10.x) for RPC communication
-  Master: 192.168.2.41 (magnesium)
-  Workers: 192.168.2.42-44 (aluminium, silicon, phosphorus)
-USAGE
-  exit 0
-}
-
 # CoreExec - Main execution function
-#
-# Arguments: All command-line args ($@)
-# Outputs: Delegates to subcommands
-# Returns: Exit code from subcommand
-# Globals: Uses all globals
+# RUNS: Locally (orchestrates everything)
 CoreExec() {
   local command="${1:-}"
-  
-  # Ensure log directory exists (on local machine only, workers handle their own)
-  if [[ "$command" == "start-master" ]]; then
-    sudo mkdir -p "${LLAMA_RPC_LOG_DIR}"
-    sudo chown "${SSH_USER}:${SSH_USER}" "${LLAMA_RPC_LOG_DIR}"
-  fi
   
   case "$command" in
     start-workers)
@@ -626,7 +627,35 @@ CoreExec() {
       ;;
       
     --help|-h|help|"")
-      ShowUsage
+      cat <<'USAGE'
+Usage: llamacpp_rpc_orchestrator.sh [--mode cluster|remote] <command> [options]
+
+Modes:
+  --mode cluster (default)  Run from cluster node (node1=master, nodes2-4=workers)
+  --mode remote             Run from remote machine (all 4 nodes as workers)
+
+Commands:
+  start-workers              Start RPC servers on worker nodes
+  start-master <profile>     Start master inference (interactive CLI)
+  start-server <profile>     Start master as OpenAI API server
+  stop                       Stop all RPC servers and master
+  stop-workers               Stop only worker RPC servers
+  stop-master                Stop only master process
+  status                     Show cluster status
+
+Examples:
+  # From your Mac (remote mode):
+  ./llamacpp_rpc_orchestrator.sh --mode remote start-workers
+  ./llamacpp_rpc_orchestrator.sh --mode remote start-server deepseek-v3
+
+  # From cluster (cluster mode):
+  ./llamacpp_rpc_orchestrator.sh start-workers
+  ./llamacpp_rpc_orchestrator.sh start-master deepseek-v3
+
+  # Stop everything:
+  ./llamacpp_rpc_orchestrator.sh --mode remote stop
+USAGE
+      exit 0
       ;;
       
     *)
