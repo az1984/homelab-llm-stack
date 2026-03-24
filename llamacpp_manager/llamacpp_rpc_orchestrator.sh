@@ -113,25 +113,40 @@ SSHExec() {
   ssh ${SSH_OPTS} "${SSH_USER}@${node_ip}" "$@"
 }
 
-# CheckLlamaBinaries - Verify llama.cpp binaries exist
+# CheckLlamaBinaries - Verify llama.cpp binaries exist on cluster nodes
 #
 # Arguments: None
-# Outputs: Error via Die if missing
-# Returns: 0 if all binaries present
-# Globals: Reads LLAMA_RPC_SERVER, LLAMA_CLI
+# Outputs: Warning if run from non-cluster machine
+# Returns: 0 (checks happen on remote nodes during execution)
+# Globals: Reads MASTER_NODE, WORKER_NODES
 CheckLlamaBinaries() {
   local hostname=""
   hostname=$(hostname)
   
-  if [[ ! -x "$LLAMA_RPC_SERVER" ]]; then
-    Die "llama-rpc-server not found at $LLAMA_RPC_SERVER on $hostname"
-  fi
+  # Check if we're on a cluster node
+  local on_cluster=false
+  for node in "$MASTER_NODE" "${WORKER_NODES[@]}"; do
+    if [[ "$hostname" == "$node" ]]; then
+      on_cluster=true
+      break
+    fi
+  done
   
-  if [[ ! -x "$LLAMA_CLI" ]] && [[ ! -x "$LLAMA_SERVER" ]]; then
-    Die "llama-cli and llama-server not found in $LLAMA_BIN on $hostname"
+  if [[ "$on_cluster" == "false" ]]; then
+    Log "⚠ Running from non-cluster machine ($hostname)"
+    Log "  Binary checks will occur on remote nodes via SSH"
+  else
+    # We're on a cluster node, verify local binaries
+    if [[ ! -x "$LLAMA_RPC_SERVER" ]]; then
+      Die "llama-rpc-server not found at $LLAMA_RPC_SERVER on $hostname"
+    fi
+    
+    if [[ ! -x "$LLAMA_CLI" ]] && [[ ! -x "$LLAMA_SERVER" ]]; then
+      Die "llama-cli and llama-server not found on $hostname"
+    fi
+    
+    Log "✓ llama.cpp binaries verified on $hostname"
   fi
-  
-  Log "✓ llama.cpp binaries verified on $hostname"
 }
 
 # StartWorkerNode - Start RPC server on a worker node
