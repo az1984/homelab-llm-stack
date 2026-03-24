@@ -246,13 +246,12 @@ BuildRPCEndpoints() {
   local rdma_ip=""
   
   if [[ "$MODE" == "remote" ]]; then
-    # Remote mode: All 4 nodes are RPC workers - use 100G RDMA IPs
-    endpoints+=("10.10.10.1:${LLAMA_RPC_PORT}")  # magnesium RDMA
+    # Remote mode: Master uses LOCAL GPU, workers 2-4 as RPC (no master in RPC list)
     endpoints+=("10.10.10.2:${LLAMA_RPC_PORT}")  # aluminium RDMA
     endpoints+=("10.10.10.3:${LLAMA_RPC_PORT}")  # silicon RDMA
     endpoints+=("10.10.10.4:${LLAMA_RPC_PORT}")  # phosphorus RDMA
   else
-    # Cluster mode: Only nodes 2-4 are RPC workers - use 100G RDMA IPs
+    # Cluster mode: Master runs locally, workers 2-4 as RPC
     endpoints+=("10.10.10.2:${LLAMA_RPC_PORT}")  # aluminium RDMA
     endpoints+=("10.10.10.3:${LLAMA_RPC_PORT}")  # silicon RDMA
     endpoints+=("10.10.10.4:${LLAMA_RPC_PORT}")  # phosphorus RDMA
