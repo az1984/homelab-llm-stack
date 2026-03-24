@@ -98,7 +98,7 @@ BuildLlamaCppArgs() {
     [[ -n "${THREADS:-}" ]] && args+=" --threads ${THREADS}"
     [[ -n "${BATCH_SIZE:-}" ]] && args+=" --batch-size ${BATCH_SIZE}"
     [[ -n "${UBATCH_SIZE:-}" ]] && args+=" --ubatch-size ${UBATCH_SIZE}"
-    [[ -n "${FLASH_ATTN:-}" ]] && [[ "${FLASH_ATTN}" == "1" ]] && args+=" --flash-attn"
+    [[ -n "${FLASH_ATTN:-}" ]] && [[ "${FLASH_ATTN}" == "1" ]] && args+=" --flash-attn on"
     [[ -n "${CONT_BATCHING:-}" ]] && [[ "${CONT_BATCHING}" == "1" ]] && args+=" --cont-batching"
   fi
   
