@@ -37,10 +37,42 @@ LLAMA_RPC_SERVER="${LLAMA_CPP_RPC_BIN}/llama-rpc-server"
 LLAMA_CLI="${LLAMA_CPP_RPC_BIN}/llama-cli"
 LLAMA_SERVER="${LLAMA_CPP_RPC_BIN}/llama-server"
 
-declare -A MODEL_PARAMS=(
-  [deepseek-v3-q4]="--ctx-size 143360 --threads 64 --n-gpu-layers 99"
-  [deepseek-v3-q5]="--ctx-size 143360 --threads 64 --n-gpu-layers 99"
-)
+# BuildLlamaCppArgs - Merge MODEL_OPTS + LLAMA_RUNTIME into command-line args
+#
+# Arguments:
+#   $1 - model_profile (string)
+# Outputs: Command-line arguments string
+# Returns: 0 on success
+# Globals: Reads MODEL_OPTS, LLAMA_RUNTIME
+BuildLlamaCppArgs() {
+  local profile="$1"
+  local args=""
+  
+  # Load semantic options
+  if [[ -n "${MODEL_OPTS[$profile]:-}" ]]; then
+    eval "${MODEL_OPTS[$profile]}"
+    
+    # Map semantic → llama.cpp flags
+    [[ -n "${CONTEXT_SIZE:-}" ]] && args+=" --ctx-size ${CONTEXT_SIZE}"
+    [[ -n "${MAX_CONCURRENCY:-}" ]] && args+=" --parallel ${MAX_CONCURRENCY}"
+    [[ -n "${ENABLE_PREFIX_CACHE:-}" ]] && [[ "${ENABLE_PREFIX_CACHE}" == "1" ]] && args+=" --cache-prompt"
+  fi
+  
+  # Load runtime-specific options
+  if [[ -n "${LLAMA_RUNTIME[$profile]:-}" ]]; then
+    eval "${LLAMA_RUNTIME[$profile]}"
+    
+    [[ -n "${N_GPU_LAYERS:-}" ]] && args+=" --n-gpu-layers ${N_GPU_LAYERS}"
+    [[ -n "${THREADS:-}" ]] && args+=" --threads ${THREADS}"
+    [[ -n "${BATCH_SIZE:-}" ]] && args+=" --batch-size ${BATCH_SIZE}"
+    [[ -n "${UBATCH_SIZE:-}" ]] && args+=" --ubatch-size ${UBATCH_SIZE}"
+    [[ -n "${FLASH_ATTN:-}" ]] && [[ "${FLASH_ATTN}" == "1" ]] && args+=" --flash-attn"
+    [[ -n "${CONT_BATCHING:-}" ]] && [[ "${CONT_BATCHING}" == "1" ]] && args+=" --cont-batching"
+  fi
+  
+  echo "$args"
+}
+
 
 # ============================================================================
 # Utility Functions
@@ -195,12 +227,12 @@ BuildRPCEndpoints() {
 #   $2 - mode (optional: "cli" or "server", default: cli)
 # Outputs: Delegates to llama-cli or llama-server
 # Returns: Exit code from llama binary
-# Globals: Reads MODELS, MODEL_PARAMS
+# Globals: Reads LLAMA_MODELS, MODEL_OPTS, LLAMA_RUNTIME
 StartMaster() {
   local profile="$1"
   local mode="${2:-cli}"
   local model_path=""
-  local params=""
+  local llama_args=""
   local rpc_endpoints=""
   local hostname=""
   
@@ -213,11 +245,11 @@ StartMaster() {
   
   # Verify model profile exists
   if [[ -z "${LLAMA_MODELS[$profile]:-}" ]]; then
-    Die "Unknown model profile: $profile. Available: ${!MODELS[*]}"
+    Die "Unknown model profile: $profile. Available: ${!LLAMA_MODELS[*]}"
   fi
   
   model_path="${LLAMA_MODELS[$profile]}"
-  params="${MODEL_PARAMS[$profile]:-}"
+  llama_args=$(BuildLlamaCppArgs "$profile")
   
   # Verify model file exists
   if [[ ! -f "$model_path" ]]; then
@@ -243,7 +275,7 @@ StartMaster() {
       exec "$LLAMA_CLI" \
         --model "$model_path" \
         --rpc "$rpc_endpoints" \
-        $params \
+        $llama_args \
         --interactive
       ;;
       
@@ -258,7 +290,7 @@ StartMaster() {
       exec "$LLAMA_SERVER" \
         --model "$model_path" \
         --rpc "$rpc_endpoints" \
-        $params \
+        $llama_args \
         --host 0.0.0.0 \
         --port "$port"
       ;;

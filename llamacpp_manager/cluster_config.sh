@@ -52,8 +52,73 @@ SSH_OPTS="-o StrictHostKeyChecking=no -o ConnectTimeout=5"
 
 LOG_DIR="${LOG_BASE}/vllm-cluster"
 
+# ============================================================================
+# Model Configuration (Three-Layer Design)
+# ============================================================================
+#
+# 1. MODEL_OPTS - Semantic/UX layer (runtime-agnostic)
+#    - What you want: context size, concurrency, KV cache type, tool parser
+#    - Shared concepts that map to both vLLM and llama.cpp
+#
+# 2. VLLM_MODELS - vLLM-specific implementation
+#    - Docker image, quantization format, tensor parallel, ray config
+#    - Model path in HuggingFace format
+#
+# 3. LLAMA_MODELS - llama.cpp-specific implementation  
+#    - GGUF model path, GPU layers, batch sizes
+#    - Runtime flags specific to llama.cpp
+
+# ----------------------------------------------------------------------------
+# MODEL_OPTS - Semantic Configuration (Runtime-Agnostic)
+# ----------------------------------------------------------------------------
+
+declare -gA MODEL_OPTS=(
+  [deepseek-v3]="
+    CONTEXT_SIZE=143360
+    MAX_CONCURRENCY=2
+    KV_CACHE_TYPE=fp8
+    TOOL_PARSER=hermes
+    ENABLE_PREFIX_CACHE=1
+  "
+  
+  [deepseek-v3-long]="
+    CONTEXT_SIZE=163840
+    MAX_CONCURRENCY=2
+    KV_CACHE_TYPE=fp8
+    TOOL_PARSER=hermes
+    ENABLE_PREFIX_CACHE=1
+  "
+  
+  [deepseek-r1]="
+    CONTEXT_SIZE=163840
+    MAX_CONCURRENCY=2
+    KV_CACHE_TYPE=fp8
+    TOOL_PARSER=hermes
+    ENABLE_PREFIX_CACHE=1
+  "
+  
+  [qwen3.5-122b]="
+    CONTEXT_SIZE=131072
+    MAX_CONCURRENCY=2
+    KV_CACHE_TYPE=auto
+    TOOL_PARSER=hermes
+    ENABLE_PREFIX_CACHE=1
+  "
+  
+  [qwen3-vl-235b]="
+    CONTEXT_SIZE=200000
+    MAX_CONCURRENCY=2
+    KV_CACHE_TYPE=auto
+    TOOL_PARSER=hermes
+    ENABLE_PREFIX_CACHE=0
+  "
+)
+
+# ----------------------------------------------------------------------------
+# VLLM_MODELS - vLLM Runtime Implementation
+# ----------------------------------------------------------------------------
+
 # Custom Docker images - map name to full image path
-# Add new images here, then reference them in model profiles via DOCKER_IMAGE=name
 declare -gA CUSTOM_IMAGES=(
   [vllm-official]="vllm/vllm-openai:v0.17.1"
   [vllm-gb10-community]="scitrera/dgx-spark-vllm:0.14.0rc2-t5"
@@ -61,7 +126,7 @@ declare -gA CUSTOM_IMAGES=(
   [vllm-nvidia-official]="nvcr.io/nvidia/vllm:25.09-py3"
 )
 
-declare -gA MODELS=(
+declare -gA VLLM_MODELS=(
   [qwen3-vl-235b]="
     DOCKER_IMAGE=vllm-official
     MODEL_DIR=/opt/ai-models/hf/qwen3/Qwen3-VL-235B-A22B-Thinking-AWQ
@@ -183,8 +248,49 @@ declare -gA MODELS=(
 # Default image if model profile doesn't specify DOCKER_IMAGE
 DEFAULT_VLLM_IMAGE="vllm-official"
 
+# ----------------------------------------------------------------------------
+# LLAMA_MODELS - llama.cpp Runtime Implementation
+# ----------------------------------------------------------------------------
+
+# Model file paths (GGUF format, split files auto-loaded from first file)
+declare -gA LLAMA_MODELS=(
+  [deepseek-v3]="${GGUF_BASE}/DeepSeek-V3-Q4_K_M/DeepSeek-V3-Q4_K_M-00001-of-00009.gguf"
+  [deepseek-v3-q5]="${GGUF_BASE}/DeepSeek-V3-Q5_K_M/DeepSeek-V3-Q5_K_M-00001-of-00010.gguf"
+  [deepseek-r1]="${GGUF_BASE}/DeepSeek-R1-Q4_K_M/DeepSeek-R1-Q4_K_M-00001-of-00009.gguf"
+)
+
+# llama.cpp runtime-specific parameters
+declare -gA LLAMA_RUNTIME=(
+  [deepseek-v3]="
+    N_GPU_LAYERS=99
+    THREADS=64
+    BATCH_SIZE=512
+    UBATCH_SIZE=512
+    FLASH_ATTN=1
+    CONT_BATCHING=1
+  "
+  
+  [deepseek-v3-q5]="
+    N_GPU_LAYERS=99
+    THREADS=64
+    BATCH_SIZE=512
+    UBATCH_SIZE=512
+    FLASH_ATTN=1
+    CONT_BATCHING=1
+  "
+  
+  [deepseek-r1]="
+    N_GPU_LAYERS=99
+    THREADS=64
+    BATCH_SIZE=512
+    UBATCH_SIZE=512
+    FLASH_ATTN=1
+    CONT_BATCHING=1
+  "
+)
+
 # ============================================================================
-# llama.cpp RPC Configuration
+# llama.cpp RPC Infrastructure
 # ============================================================================
 
 LLAMA_RPC_LOG_DIR="${LOG_BASE}/llama-rpc"
@@ -194,14 +300,3 @@ LLAMA_RPC_PORT="50052"
 NODE_TOTAL_MEMORY_GB=128
 WORKER_MEMORY_GB=120
 WORKER_MEMORY_MB=$((WORKER_MEMORY_GB * 1024))
-
-# llama.cpp RPC model profiles
-# Models are split into multiple files - llama.cpp auto-loads all parts from first file
-declare -gA LLAMA_MODELS=(
-  [deepseek-v3-q4]="${GGUF_BASE}/DeepSeek-V3-Q4_K_M/DeepSeek-V3-Q4_K_M-00001-of-00009.gguf"
-  [deepseek-v3-q5]="${GGUF_BASE}/DeepSeek-V3-Q5_K_M/DeepSeek-V3-Q5_K_M-00001-of-00010.gguf"
-)
-
-SSH_USER="admin"
-SSH_KEY=""
-LOG_DIR="/opt/ai-tools/logs/vllm-cluster"
