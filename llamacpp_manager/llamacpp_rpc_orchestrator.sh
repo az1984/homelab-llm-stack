@@ -160,7 +160,8 @@ StartWorkerNode() {
   # Start RPC server via SSH
   # Use nohup to persist after SSH disconnect
   SSHExec "$node_ip" "
-    mkdir -p ${LLAMA_RPC_LOG_DIR}
+    sudo mkdir -p ${LLAMA_RPC_LOG_DIR}
+    sudo chown ${SSH_USER}:${SSH_USER} ${LLAMA_RPC_LOG_DIR}
     nohup ${LLAMA_RPC_SERVER} \
       -H 0.0.0.0 \
       -p ${LLAMA_RPC_PORT} \
@@ -504,8 +505,11 @@ USAGE
 CoreExec() {
   local command="${1:-}"
   
-  # Ensure log directory exists
-  mkdir -p "$LOG_DIR"
+  # Ensure log directory exists (on local machine only, workers handle their own)
+  if [[ "$command" == "start-master" ]]; then
+    sudo mkdir -p "${LLAMA_RPC_LOG_DIR}"
+    sudo chown "${SSH_USER}:${SSH_USER}" "${LLAMA_RPC_LOG_DIR}"
+  fi
   
   case "$command" in
     start-workers)
