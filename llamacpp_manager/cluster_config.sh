@@ -60,11 +60,6 @@ declare -gA CUSTOM_IMAGES=(
   [vllm-gb10-old]="hellohal2064/vllm-dgx-spark-gb10:latest"
   [vllm-nvidia-official]="nvcr.io/nvidia/vllm:25.09-py3"
 )
-  [vllm-official]="vllm/vllm-openai:v0.17.1"
-  [vllm-gb10-community]="scitrera/dgx-spark-vllm:0.14.0rc2-t5"
-  [vllm-gb10-old]="hellohal2064/vllm-dgx-spark-gb10:latest"
-  [vllm-nvidia-official]="nvcr.io/nvidia/vllm:25.09-py3"
-)
 
 declare -gA MODELS=(
   [qwen3-vl-235b]="
