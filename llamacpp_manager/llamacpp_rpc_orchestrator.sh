@@ -102,6 +102,10 @@ BuildLlamaCppArgs() {
     # Note: --cont-batching is server-only, not used for llama-cli
   fi
   
+  # Force even distribution across local GPU + RPC workers
+  # Local GPU gets 1 part, each RPC worker gets 1 part = 1:1:1:1 split
+  args+=" --split-mode layer --tensor-split 1,1,1,1"
+  
   echo "$args"
 }
 
