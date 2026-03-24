@@ -291,6 +291,7 @@ StartMaster() {
     case "$mode" in
       cli)
         # Interactive mode - need terminal passthrough
+        # llama-cli supports --interactive flag
         SSHExec "${MASTER_IP}" "
           ${LLAMA_CLI} \
             --model ${model_path} \
@@ -301,6 +302,7 @@ StartMaster() {
         ;;
       server)
         # Server mode - run in background on remote
+        # llama-server does NOT use --interactive flag
         local port="${LLAMA_SERVER_PORT:-8080}"
         Log "Starting llama-server on ${MASTER_NODE}:${port}..."
         Log "OpenAI-compatible API at: http://${MASTER_IP}:${port}/v1"
@@ -343,6 +345,7 @@ StartMaster() {
     case "$mode" in
       cli)
         # Interactive CLI mode (LOCAL EXEC)
+        # llama-cli supports --interactive flag
         Log "Starting llama-cli in interactive mode..."
         Log "Type your prompt and press Enter. Ctrl+C to exit."
         
@@ -356,6 +359,7 @@ StartMaster() {
         
       server)
         # OpenAI-compatible API server mode (LOCAL EXEC)
+        # llama-server does NOT use --interactive flag
         local port="${LLAMA_SERVER_PORT:-8080}"
         
         Log "Starting llama-server on port ${port}..."

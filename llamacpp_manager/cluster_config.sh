@@ -254,8 +254,8 @@ DEFAULT_VLLM_IMAGE="vllm-official"
 
 # Model file paths (GGUF format, split files auto-loaded from first file)
 declare -gA LLAMA_MODELS=(
-  [deepseek-v3]="${GGUF_BASE}/DeepSeek-V3-Q4_K_M/DeepSeek-V3-Q4_K_M-00001-of-00009.gguf"
-  [deepseek-v3-q5]="${GGUF_BASE}/DeepSeek-V3-Q5_K_M/DeepSeek-V3-Q5_K_M-00001-of-00010.gguf"
+  [deepseek-v3]="${GGUF_BASE}/unsloth/DeepSeek-V3/DeepSeek-V3-Q4_K_M/DeepSeek-V3-Q4_K_M-00001-of-00009.gguf"
+  [deepseek-v3-q5]="${GGUF_BASE}/unsloth/DeepSeek-V3/DeepSeek-V3-Q5_K_M/DeepSeek-V3-Q5_K_M-00001-of-00010.gguf"
   [deepseek-r1]="${GGUF_BASE}/DeepSeek-R1-Q4_K_M/DeepSeek-R1-Q4_K_M-00001-of-00009.gguf"
 )
 
@@ -295,6 +295,7 @@ declare -gA LLAMA_RUNTIME=(
 
 LLAMA_RPC_LOG_DIR="${LOG_BASE}/llama-rpc"
 LLAMA_RPC_PORT="50052"
+LLAMA_SERVER_PORT="8003"  # chat-prose endpoint (distributed RPC cluster)
 
 # Per-node memory allocation (leave ~8GB for system)
 NODE_TOTAL_MEMORY_GB=128
