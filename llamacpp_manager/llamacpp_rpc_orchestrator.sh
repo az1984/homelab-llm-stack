@@ -5,13 +5,50 @@
 # Master: magnesium (192.168.2.42) - hosts model, does tokenization
 # Workers: aluminium, silicon, phosphorus - run RPC servers
 #
+# Modes:
+#   --mode cluster (default): Run from cluster node (master=node1, workers=nodes2-4)
+#   --mode remote:            Run from remote machine (all 4 nodes as workers)
+#
 # Usage:
+#   # From your Mac (remote mode - all 4 nodes as workers):
+#   ./llamacpp_rpc_orchestrator.sh --mode remote start-workers
+#   ./llamacpp_rpc_orchestrator.sh --mode remote start-master <profile> [cli|server]
+#
+#   # From cluster node (cluster mode - node1=master, nodes2-4=workers):
 #   ./llamacpp_rpc_orchestrator.sh start-workers
-#   ./llamacpp_rpc_orchestrator.sh start-master <model_profile>
+#   ./llamacpp_rpc_orchestrator.sh start-master <profile> [cli|server]
+#
+#   # Common commands:
 #   ./llamacpp_rpc_orchestrator.sh stop
 #   ./llamacpp_rpc_orchestrator.sh status
 
 set -euo pipefail
+
+# ============================================================================
+# Parse Mode Flag
+# ============================================================================
+
+MODE="cluster"  # Default: cluster mode (master=node1, workers=nodes2-4)
+
+# Parse --mode before anything else
+TEMP_ARGS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --mode)
+      MODE="$2"
+      if [[ "$MODE" != "cluster" && "$MODE" != "remote" ]]; then
+        echo "ERROR: --mode must be 'cluster' or 'remote'" >&2
+        exit 1
+      fi
+      shift 2
+      ;;
+    *)
+      TEMP_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+set -- "${TEMP_ARGS[@]}"  # Restore positional parameters
 
 # ============================================================================
 # Load Cluster Configuration
@@ -33,7 +70,7 @@ source "${CONFIG_FILE}"
 # ============================================================================
 
 # Binary paths
-LLAMA_RPC_SERVER="${LLAMA_CPP_RPC_BIN}/llama-rpc-server"
+LLAMA_RPC_SERVER="${LLAMA_CPP_RPC_BIN}/rpc-server"
 LLAMA_CLI="${LLAMA_CPP_RPC_BIN}/llama-cli"
 LLAMA_SERVER="${LLAMA_CPP_RPC_BIN}/llama-server"
 
@@ -199,19 +236,31 @@ StartWorkerNode() {
   fi
 }
 
-# StartAllWorkers - Start RPC servers on all worker nodes
+# StartAllWorkers - Start RPC servers on worker nodes
 #
 # Arguments: None
 # Outputs: Progress via Log
 # Returns: 0 (always succeeds, individual failures logged)
-# Globals: Reads WORKER_NODES, WORKER_IPS
+# Globals: Reads MODE, MASTER_NODE, MASTER_IP, WORKER_NODES, WORKER_IPS
 StartAllWorkers() {
   local i=0
+  local nodes_to_start=()
+  local ips_to_start=()
   
-  Log "Starting RPC servers on all worker nodes..."
+  if [[ "$MODE" == "remote" ]]; then
+    # Remote mode: Start RPC servers on ALL 4 nodes
+    Log "Starting RPC servers on all 4 nodes (remote mode)..."
+    nodes_to_start=("$MASTER_NODE" "${WORKER_NODES[@]}")
+    ips_to_start=("$MASTER_IP" "${WORKER_IPS[@]}")
+  else
+    # Cluster mode: Start RPC servers on nodes 2-4 only (node 1 is master)
+    Log "Starting RPC servers on worker nodes (cluster mode)..."
+    nodes_to_start=("${WORKER_NODES[@]}")
+    ips_to_start=("${WORKER_IPS[@]}")
+  fi
   
-  for i in "${!WORKER_NODES[@]}"; do
-    StartWorkerNode "${WORKER_NODES[$i]}" "${WORKER_IPS[$i]}" || true
+  for i in "${!nodes_to_start[@]}"; do
+    StartWorkerNode "${nodes_to_start[$i]}" "${ips_to_start[$i]}" || true
   done
   
   Log "Worker startup complete"
@@ -222,14 +271,23 @@ StartAllWorkers() {
 # Arguments: None
 # Outputs: Comma-separated RPC endpoints to stdout
 # Returns: 0 (always succeeds)
-# Globals: Reads WORKER_IPS, RPC_PORT
+# Globals: Reads MODE, MASTER_IP, WORKER_IPS, LLAMA_RPC_PORT
 BuildRPCEndpoints() {
   local endpoints=()
   local ip=""
   
-  for ip in "${WORKER_IPS[@]}"; do
-    endpoints+=("${ip}:${LLAMA_RPC_PORT}")
-  done
+  if [[ "$MODE" == "remote" ]]; then
+    # Remote mode: All 4 nodes are RPC workers
+    endpoints+=("${MASTER_IP}:${LLAMA_RPC_PORT}")
+    for ip in "${WORKER_IPS[@]}"; do
+      endpoints+=("${ip}:${LLAMA_RPC_PORT}")
+    done
+  else
+    # Cluster mode: Only nodes 2-4 are RPC workers
+    for ip in "${WORKER_IPS[@]}"; do
+      endpoints+=("${ip}:${LLAMA_RPC_PORT}")
+    done
+  fi
   
   # Join with commas
   local IFS=','
