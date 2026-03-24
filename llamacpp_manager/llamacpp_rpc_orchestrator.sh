@@ -204,7 +204,7 @@ StartWorkerNode() {
   Log "Starting RPC server on ${node_name} (${node_ip})..."
   
   # Check if already running
-  if SSHExec "$node_ip" "pgrep -f llama-rpc-server" >/dev/null 2>&1; then
+  if SSHExec "$node_ip" "pgrep -f rpc-server" >/dev/null 2>&1; then
     Log "  RPC server already running on ${node_name}"
     return 0
   fi
@@ -217,7 +217,7 @@ StartWorkerNode() {
     nohup ${LLAMA_RPC_SERVER} \
       -H 0.0.0.0 \
       -p ${LLAMA_RPC_PORT} \
-      -m ${WORKER_MEMORY_MB} \
+      -t 64 \
       --cache \
       > ${log_file} 2>&1 &
     echo \$! > ${LLAMA_RPC_LOG_DIR}/${node_name}_rpc_server.pid
