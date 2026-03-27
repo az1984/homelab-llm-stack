@@ -74,8 +74,8 @@ LOG_DIR="${LOG_BASE}/vllm-cluster"
 
 declare -gA MODEL_OPTS=(
   [deepseek-v3]="
-    CONTEXT_SIZE=143360
-    MAX_CONCURRENCY=2
+    CONTEXT_SIZE=32768
+    MAX_CONCURRENCY=1
     KV_CACHE_TYPE=fp8
     TOOL_PARSER=hermes
     ENABLE_PREFIX_CACHE=1
