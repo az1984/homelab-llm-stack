@@ -15,6 +15,7 @@ declare -gA CUSTOM_IMAGES=(
   [vllm-gb10-community]="scitrera/dgx-spark-vllm:0.14.0rc2-t5"
   [vllm-gb10-old]="hellohal2064/vllm-dgx-spark-gb10:latest"
   [vllm-nvidia-official]="nvcr.io/nvidia/vllm:25.09-py3"
+  [vllm-gb10-0.18.0]="192.168.2.42:5000/vllm-gb10:0.18.0"
 )
 
 declare -gA MODELS=(
@@ -39,7 +40,7 @@ declare -gA MODELS=(
   "
   
   [deepseek-v3-dense]="
-    DOCKER_IMAGE=vllm-gb10-community
+    DOCKER_IMAGE=vllm-gb10-0.18.0
     MODEL_DIR=/opt/ai-models/hf/cognitivecomputations/DeepSeek-V3-AWQ
     SERVED_MODEL_NAME=chat-heavy
     TENSOR_PARALLEL_SIZE=4
@@ -59,7 +60,7 @@ declare -gA MODELS=(
   "
   
   [deepseek-v3]="
-    DOCKER_IMAGE=vllm-gb10-community
+    DOCKER_IMAGE=vllm-gb10-0.18.0
     MODEL_DIR=/opt/ai-models/hf/QuantTrio/DeepSeek-V3.2-AWQ
     SERVED_MODEL_NAME=chat-heavy
     TENSOR_PARALLEL_SIZE=4
@@ -79,7 +80,7 @@ declare -gA MODELS=(
   "
   
   [deepseek-v3-future]="
-    DOCKER_IMAGE=vllm-gb10-community
+    DOCKER_IMAGE=vllm-gb10-0.18.0
     MODEL_DIR=/opt/ai-models/hf/QuantTrio/DeepSeek-V3.2-AWQ
     SERVED_MODEL_NAME=chat-heavy
     TENSOR_PARALLEL_SIZE=4
@@ -98,7 +99,7 @@ declare -gA MODELS=(
   "
 
   [deepseek-r1]="
-    DOCKER_IMAGE=vllm-gb10-community
+    DOCKER_IMAGE=vllm-gb10-0.18.0
     MODEL_DIR=/opt/ai-models/hf/DeepSeek-R1-AWQ
     SERVED_MODEL_NAME=chat-heavy
     TENSOR_PARALLEL_SIZE=4

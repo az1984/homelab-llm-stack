@@ -38,6 +38,7 @@ get_node_info() {
 ensure_container() {
   local node_num=$1
   local image_name=${2:-$DEFAULT_VLLM_IMAGE}  # Use default if not specified
+  local head_fabric_ip=${3:-}  # Ray head IP (optional, set by start-cluster)
   
   # Skip if not in active nodes
   is_node_active $node_num || { Log "Skipping node $node_num (filtered)"; return 0; }
@@ -51,6 +52,7 @@ ensure_container() {
 
   Log "Ensuring container on node ${node_num} (${node_name} @ ${node_ip})"
   Log "  Using image: ${image_name} → ${image_path}"
+  [[ -n "$head_fabric_ip" ]] && Log "  Ray head: ${head_fabric_ip}"
 
   # Remove old container if exists
   ssh admin@${node_ip} "sudo docker rm -f vllm-node-${node_num} 2>/dev/null || true"
@@ -60,6 +62,10 @@ ensure_container() {
 
   # Copy the manager script to the node
   scp vllm_cluster_mgr.sh admin@${node_ip}:/tmp/vllm_cluster_mgr.sh
+
+  # Build container command with optional RAY_HEAD_IP
+  local env_ray_head=""
+  [[ -n "$head_fabric_ip" ]] && env_ray_head="-e RAY_HEAD_IP=${head_fabric_ip}"
 
   # Start container
   ssh admin@${node_ip} "sudo docker run -d \
@@ -72,6 +78,7 @@ ensure_container() {
     --shm-size=10g \
     -e THIS_NODE=${node_num} \
     -e RAY_NODE_IP=${fabric_ip} \
+    ${env_ray_head} \
     -e NCCL_SOCKET_IFNAME=enp1s0f0np0 \
     -e NCCL_IB_DISABLE=0 \
     -e NCCL_IB_HCA=rocep1s0f0 \
@@ -93,11 +100,18 @@ cmd_start_cluster() {
   
   Log "=== Starting ${num_nodes}-node cluster ==="
   
+  # Determine head node (first active node or node 1)
+  local head_node=1
   if [[ ${#ACTIVE_NODES[@]} -gt 0 ]]; then
+    head_node="${ACTIVE_NODES[0]}"
     Log "Active nodes: ${ACTIVE_NODES[*]}"
+    Log "Head node: ${head_node}"
   else
     Log "All nodes 1-${num_nodes} will be used"
+    Log "Head node: 1"
   fi
+  
+  local head_fabric_ip=$(get_node_info $head_node fabric_ip)
   
   # Determine which image to use
   local image_name=$DEFAULT_VLLM_IMAGE
@@ -111,7 +125,7 @@ cmd_start_cluster() {
   fi
 
   for i in $(seq 1 ${num_nodes}); do
-    ensure_container ${i} "${image_name}"
+    ensure_container ${i} "${image_name}" "${head_fabric_ip}"
   done
 
   Log "Containers ready. Use load-model to start cluster with model-specific Ray settings."
