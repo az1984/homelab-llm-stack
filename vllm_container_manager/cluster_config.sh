@@ -41,7 +41,7 @@ declare -gA MODELS=(
   
   [deepseek-v3-dense]="
     DOCKER_IMAGE=vllm-gb10-0.18.0
-    MODEL_DIR=/opt/ai-models/hf/cognitivecomputations/DeepSeek-V3-AWQ
+    MODEL_DIR=/opt/ai-models/hf/QuixiAI/DeepSeek-V3-AWQ
     SERVED_MODEL_NAME=chat-heavy
     TENSOR_PARALLEL_SIZE=4
     QUANTIZATION=awq

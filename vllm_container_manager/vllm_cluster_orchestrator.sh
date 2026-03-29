@@ -177,20 +177,25 @@ cmd_load_model() {
   
   export RAY_OBJECT_STORE_GB="${ray_store_gb}"
   
-  # Start Ray on selected nodes
+  # Start Ray on selected nodes (in parallel)
   for node_num in "${nodes_to_use[@]}"; do
     local node_name=$(get_node_info $node_num name)
     local node_ip_i=$(get_node_info $node_num lan_ip)
     local fabric_ip=$(get_node_info $node_num fabric_ip)
     
     Log "Starting Ray on node ${node_num} (${node_name})"
-    ssh admin@${node_ip_i} "sudo docker exec \
-      -e THIS_NODE=${node_num} \
-      -e RAY_NODE_IP=${fabric_ip} \
-      -e RAY_HEAD_IP=${head_fabric_ip} \
-      -e RAY_OBJECT_STORE_GB=${ray_store_gb} \
-      vllm-node-${node_num} /opt/vllm_cluster.sh start-ray"
+    (
+      ssh admin@${node_ip_i} "sudo docker exec \
+        -e THIS_NODE=${node_num} \
+        -e RAY_NODE_IP=${fabric_ip} \
+        -e RAY_HEAD_IP=${head_fabric_ip} \
+        -e RAY_OBJECT_STORE_GB=${ray_store_gb} \
+        vllm-node-${node_num} /opt/vllm_cluster.sh start-ray"
+    ) &
   done
+  
+  # Wait for all Ray processes to finish starting
+  wait
   
   Log "Waiting for Ray to stabilize (5s)"
   sleep 5
