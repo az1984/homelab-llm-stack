@@ -83,9 +83,12 @@ declare -gA MODELS=(
     MODEL_DIR=/opt/ai-models/hf/QuantTrio/DeepSeek-V3.1-AWQ
     SERVED_MODEL_NAME=chat-heavy
     TENSOR_PARALLEL_SIZE=4
+    QUANTIZATION=awq_marlin
     MAX_MODEL_LEN=143360
     MAX_NUM_SEQS=1
     GPU_MEMORY_UTILIZATION=0.88
+    DTYPE=bfloat16
+    ENFORCE_EAGER=1
     ENABLE_PREFIX_CACHING=1
     ENABLE_CHUNKED_PREFILL=1
     KV_CACHE_DTYPE=auto
@@ -94,7 +97,6 @@ declare -gA MODELS=(
     TOOL_CALL_PARSER=hermes
     VLLM_PORT=8000
     RAY_OBJECT_STORE_GB=2
-    ENFORCE_EAGER=0
   "
 
   [deepseek-r1]="

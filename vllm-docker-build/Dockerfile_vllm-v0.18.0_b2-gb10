@@ -1,0 +1,220 @@
+# =============================================================================
+# vLLM v0.18.0 for NVIDIA GB10 (Blackwell ARM) - CUDA 13.0 Build
+# =============================================================================
+# v1.2 CHANGES FROM v1.1:
+# - Force-reinstall torch 2.10.0+cu130 to pick up PyTorch's updated wheel
+#   that fixes CUBLAS_STATUS_INVALID_VALUE on sm_121 (pytorch/pytorch#174949)
+#   The original 2.10.0 wheel pinned nvidia-cublas-cu12==12.8.4.1; the fix
+#   requires 12.9.1.4. PyTorch republished the wheel in-place — force-reinstall
+#   ensures Docker's layer cache doesn't silently reuse the old copy.
+# - vLLM v0.18.0 also ships MLA crash fix for AWQ/GPTQ models (PR #34695)
+#   which directly targets the mla_attention.py:720 post-loading crash.
+#
+# v1.1 CHANGES FROM v1.0:
+# - Ray version: 2.40.0 → >=2.54.0 (fixes "No module named 'ray'" error)
+# 
+# CRITICAL FIX: PyTorch from cu130 wheels with sm_121 support
+# Based on: PyTorch 2.10+ official ARM64 CUDA 13.0 support
+# Target: 4-node DGX Spark cluster (GB10 compute capability 12.1)
+# =============================================================================
+
+FROM nvidia/cuda:13.0.0-devel-ubuntu24.04
+
+# =============================================================================
+# BASE SYSTEM PACKAGES
+# =============================================================================
+# Ubuntu 24.04 ships with Python 3.12 by default
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-dev \
+    python3-venv \
+    python3-pip \
+    git \
+    build-essential \
+    ninja-build \
+    cmake \
+    ccache \
+    curl \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set Python 3 as default python command
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3 1
+
+# Upgrade pip (Ubuntu 24.04 requires --break-system-packages for Docker builds)
+# Use --ignore-installed to avoid conflicts with Debian-managed packages
+RUN python3 -m pip install --break-system-packages --ignore-installed --upgrade pip setuptools wheel
+
+WORKDIR /workspace
+
+# =============================================================================
+# PYTORCH + TORCHVISION (CUDA 13.0 with sm_121 support)
+# =============================================================================
+# VERIFIED cu130 index versions for Python 3.12 ARM64:
+# - torch 2.10.0+cu130 (2.11.0 does NOT exist for cu130!)
+# - torchvision 0.25.0+cu130 (matches PyTorch 2.10.0)
+# Source: https://download.pytorch.org/whl/cu130/torch/
+#
+# v1.2 FIX: --force-reinstall ensures we pull PyTorch's republished wheel.
+# The original torch 2.10.0 wheel bundled nvidia-cublas-cu12==12.8.4.1 which
+# triggers CUBLAS_STATUS_INVALID_VALUE on sm_121 for MLA dequant matmuls.
+# PyTorch fixed this by republishing 2.10.0 in-place with cublas 12.9.1.4.
+# --no-deps prevents the solver from re-pinning cuBLAS back to the old version.
+# (pytorch/pytorch#174949, vLLM v0.18.0 release notes)
+RUN pip3 install --break-system-packages --no-cache-dir \
+    'numpy<2' \
+    torchvision==0.25.0 \
+    --index-url 'https://download.pytorch.org/whl/cu130' && \
+    pip3 install --break-system-packages --no-cache-dir \
+    --force-reinstall --no-deps \
+    torch==2.10.0 \
+    --index-url 'https://download.pytorch.org/whl/cu130'
+
+# =============================================================================
+# RAY (REQUIRED for multi-node distributed inference)
+# =============================================================================
+# vLLM v0.18.0 requires Ray 2.54.0+ for 4-node tensor parallelism
+# CRITICAL FIX: v1.0 build had 2.40.0 which caused "No module named 'ray'" errors
+# Source: vLLM v0.18.0 runtime errors + distributed serving requirements
+RUN pip3 install --break-system-packages --no-cache-dir 'ray[default]>=2.54.0'
+
+# =============================================================================
+# TRITON (Latest for ARM + CUDA 13.0 compatibility)
+# =============================================================================
+# Triton 3.6.x (release/3.1.x branch) has ARM64 support
+# Must install cmake/ninja via pip for Triton's build system
+RUN pip3 install --break-system-packages --no-cache-dir cmake ninja && \
+    git clone https://github.com/triton-lang/triton.git && \
+    cd triton && \
+    git checkout release/3.1.x && \
+    pip3 install --break-system-packages --no-cache-dir build && \
+    python3 -m build --no-isolation --wheel ./python && \
+    pip3 install --break-system-packages python/dist/*.whl && \
+    cd .. && \
+    rm -rf triton
+
+# =============================================================================
+# FLASHMLA (DeepSeek MLA attention kernels)
+# =============================================================================
+# FlashMLA is critical for DeepSeek V3 MLA (Multi-head Latent Attention)
+# Source: DeepSeek-AI GitHub repo with CUTLASS submodule
+# Patch: Replace setup.py to exclude sm_100 (Blackwell) kernels that fail on ARM
+COPY setup.py.flashmla.patched /tmp/
+RUN git clone https://github.com/deepseek-ai/FlashMLA.git /tmp/flashmla && \
+    cd /tmp/flashmla && \
+    git submodule update --init --recursive && \
+    cp /tmp/setup.py.flashmla.patched setup.py && \
+    TORCH_CUDA_ARCH_LIST="9.0;9.0a;12.0;12.1" \
+    pip3 install --break-system-packages --no-cache-dir --no-build-isolation . && \
+    cd / && \
+    rm -rf /tmp/flashmla /tmp/setup.py.flashmla.patched
+
+# =============================================================================
+# DEEPGEMM (Optional - DeepSeek MoE sparse GEMM optimizations)
+# =============================================================================
+# DeepGEMM provides faster MoE routing for DeepSeek models
+# Optional but recommended for 670B parameter model performance
+RUN git clone https://github.com/deepseek-ai/DeepGEMM.git /tmp/deepgemm && \
+    cd /tmp/deepgemm && \
+    git checkout v2.1.1.post3 && \
+    git submodule update --init --recursive && \
+    pip3 install --break-system-packages --no-cache-dir --no-build-isolation . && \
+    cd / && \
+    rm -rf /tmp/deepgemm
+
+#echo "DELIBERATE INSERTION TO CLEAR CACHE" 
+
+# =============================================================================
+# VLLM v0.18.0 (From source with GB10 patches)
+# =============================================================================
+ARG VLLM_VERSION=v0.18.0
+
+# Clone vLLM
+RUN git clone https://github.com/vllm-project/vllm.git && \
+    cd vllm && \
+    git checkout ${VLLM_VERSION}
+
+WORKDIR /workspace/vllm
+
+# =============================================================================
+# CRITICAL BUILD CONFIGURATION
+# Proven patches from successful GB10 deployment
+# =============================================================================
+
+# Target architectures: Hopper + Blackwell
+# 9.0 = Hopper baseline (H100, GH200, GB10)
+# 9.0a = Hopper arch-specific optimizations (wgmma, CUTLASS)
+# 12.0 = Blackwell workstation (RTX 5090, RTX 6000)
+# 12.1 = GB10's actual compute capability (CRITICAL - this is what fixes the kernel error)
+ENV TORCH_CUDA_ARCH_LIST="9.0;9.0a;12.0;12.1"
+
+# Enable DeepSeek MLA support
+ENV FLASH_MLA_ENABLED=1
+ENV FLASH_MLA_DISABLE_COMPILE_TIME_CHECK=1
+ENV VLLM_INSTALL_PUNICA_KERNELS=1
+
+# Build parallelism
+ENV MAX_JOBS=4
+ENV NVCC_THREADS=4
+
+# Use ccache to speed up rebuilds
+ENV PATH=/usr/lib/ccache:$PATH
+
+# Copy pre-patched setup.py (FA3 disabled for GB10 ARM)
+# CRITICAL: This patched setup.py is the ONLY thing that worked to disable FA3
+# Do NOT modify this approach - it's proven from the successful build
+COPY setup.py.patched setup.py
+
+# setuptools_scm: vLLM's setup.py imports it at top level for version detection from git tags.
+# --no-isolation means pip won't auto-install build deps, so we must provide it explicitly.
+# setuptools >=77.0.3 required by vLLM's pyproject.toml
+RUN pip3 install --break-system-packages --no-cache-dir \
+    'setuptools>=77.0.3,<81' \
+    setuptools_scm \
+    packaging
+
+# Build + install vLLM with FA2 + FlashMLA (FA3 disabled)
+# Using pip --no-build-isolation instead of python3 -m build --no-isolation:
+# pip is more lenient about torch version suffixes (2.10.0+cu130 satisfies ==2.10.0)
+RUN pip3 install --break-system-packages --no-build-isolation --no-cache-dir .
+
+# =============================================================================
+# ADDITIONAL DEPENDENCIES (verified from vLLM setup.py)
+# =============================================================================
+# These are runtime dependencies that may not be caught during build
+RUN pip3 install --break-system-packages --no-cache-dir \
+    'transformers>=4.41.0' \
+    'tokenizers>=0.19.0' \
+    'fastapi>=0.105.0' \
+    'uvicorn[standard]>=0.22.0' \
+    'pydantic>=2.0.0' \
+    'aioprometheus[starlette]>=23.12.0' \
+    'pillow>=10.0.0' \
+    'sentencepiece>=0.2.0' \
+    'msgpack>=1.0.0' \
+    'gguf>=0.5.0' \
+    'importlib_metadata>=6.0.0' \
+    'mistral-common>=1.0.0' \
+    'numpy<2.0.0' \
+    'requests>=2.26.0' \
+    'tqdm>=4.66.0' \
+    'py-cpuinfo>=9.0.0' \
+    'pynvml>=11.5.0'
+
+# =============================================================================
+# CLEANUP
+# =============================================================================
+WORKDIR /workspace
+RUN rm -rf vllm
+
+# Remove build artifacts to reduce image size
+RUN pip3 cache purge && \
+    rm -rf /root/.cache
+
+# =============================================================================
+# RUNTIME CONFIGURATION
+# =============================================================================
+WORKDIR /workspace
+
+# Entry point for vLLM OpenAI server
+ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
