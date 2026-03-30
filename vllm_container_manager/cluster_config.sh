@@ -41,10 +41,9 @@ declare -gA MODELS=(
   
   [deepseek-v3-dense]="
     DOCKER_IMAGE=vllm-gb10-0.18.0
-    MODEL_DIR=/opt/ai-models/hf/QuixiAI/DeepSeek-V3-AWQ
+    MODEL_DIR=/opt/ai-models/hf/cognitivecomputations/DeepSeek-V3-AWQ
     SERVED_MODEL_NAME=chat-heavy
     TENSOR_PARALLEL_SIZE=4
-    QUANTIZATION=awq
     MAX_MODEL_LEN=143360
     MAX_NUM_SEQS=1
     GPU_MEMORY_UTILIZATION=0.88
@@ -79,23 +78,24 @@ declare -gA MODELS=(
     ENFORCE_EAGER=0
   "
   
-  [deepseek-v3-future]="
+  [deepseek-v3.1]="
     DOCKER_IMAGE=vllm-gb10-0.18.0
-    MODEL_DIR=/opt/ai-models/hf/QuantTrio/DeepSeek-V3.2-AWQ
+    MODEL_DIR=/opt/ai-models/hf/QuantTrio/DeepSeek-V3.1-AWQ
     SERVED_MODEL_NAME=chat-heavy
     TENSOR_PARALLEL_SIZE=4
-    QUANTIZATION=awq
-    MAX_MODEL_LEN=163840
-    MAX_NUM_SEQS=2
-    GPU_MEMORY_UTILIZATION=0.90
+    QUANTIZATION=awq_marlin
+    MAX_MODEL_LEN=143360
+    MAX_NUM_SEQS=1
+    GPU_MEMORY_UTILIZATION=0.88
     ENABLE_PREFIX_CACHING=1
     ENABLE_CHUNKED_PREFILL=1
-    KV_CACHE_DTYPE=fp8
+    KV_CACHE_DTYPE=auto
     TRUST_REMOTE_CODE=1
     ENABLE_AUTO_TOOL_CHOICE=1
     TOOL_CALL_PARSER=hermes
     VLLM_PORT=8000
     RAY_OBJECT_STORE_GB=2
+    ENFORCE_EAGER=0
   "
 
   [deepseek-r1]="
