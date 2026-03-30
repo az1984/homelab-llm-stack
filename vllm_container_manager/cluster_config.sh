@@ -83,7 +83,6 @@ declare -gA MODELS=(
     MODEL_DIR=/opt/ai-models/hf/QuantTrio/DeepSeek-V3.1-AWQ
     SERVED_MODEL_NAME=chat-heavy
     TENSOR_PARALLEL_SIZE=4
-    QUANTIZATION=awq_marlin
     MAX_MODEL_LEN=143360
     MAX_NUM_SEQS=1
     GPU_MEMORY_UTILIZATION=0.88
