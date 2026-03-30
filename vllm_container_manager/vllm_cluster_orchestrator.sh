@@ -86,6 +86,7 @@ ensure_container() {
     -v /opt/ai-models:/opt/ai-models:ro \
     -v /opt/ai-tools/logs:/opt/ai-tools/logs \
     -v /opt/ai-tools/run:/opt/ai-tools/run \
+    -v /opt/ai-tools/cache/triton:/root/.triton/cache \
     -v /tmp/vllm_cluster_mgr.sh:/opt/vllm_cluster.sh:ro \
     --entrypoint /bin/bash \
     ${image_path} \
