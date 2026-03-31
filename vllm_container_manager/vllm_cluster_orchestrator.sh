@@ -300,15 +300,15 @@ Image Selection:
     vllm-nvidia-official - nvcr.io/nvidia/vllm:25.09-py3
 
 Examples:
-  # Qwen3-VL-235B on nodes 1-2 (uses proven v0.17.1 image)
+  # Qwen3-VL-235B on nodes 1-2 (uses official v0.17.1 image)
   ./vllm_cluster_orchestrator.sh --nodes 1,2 start-cluster 2 qwen3-vl-235b
   ./vllm_cluster_orchestrator.sh --nodes 1,2 load-model qwen3-vl-235b
   
   # DeepSeek-V3-dense on all 4 nodes (uses GB10 community image with newer vLLM)
-  ./vllm_cluster_orchestrator.sh start-cluster 4 deepseek-v3-dense
-  ./vllm_cluster_orchestrator.sh load-model deepseek-v3-dense
+  ./vllm_cluster_orchestrator.sh --nodes 1,2,3,4 start-cluster 4 deepseek-v3-dense
+  ./vllm_cluster_orchestrator.sh --nodes 1,2,3,4 load-model deepseek-v3-dense
 
-  # Qwen3.5-122B on nodes 3-4 (uses GB10 community image)
+  # Qwen3.5-122B on nodes 3-4 (uses official v0.17.1 image)
   ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster 2 qwen3.5-122b
   ./vllm_cluster_orchestrator.sh --nodes 3,4 load-model qwen3.5-122b
 
