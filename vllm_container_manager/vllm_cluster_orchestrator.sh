@@ -39,6 +39,7 @@ ensure_container() {
   local node_num=$1
   local image_name=${2:-$DEFAULT_VLLM_IMAGE}  # Use default if not specified
   local head_fabric_ip=${3:-}  # Ray head IP (optional, set by start-cluster)
+  local profile=${4:-unknown}  # Model profile name for labeling
   
   # Skip if not in active nodes
   is_node_active $node_num || { Log "Skipping node $node_num (filtered)"; return 0; }
@@ -50,8 +51,18 @@ ensure_container() {
   local node_ip=$(get_node_info $node_num lan_ip)
   local fabric_ip=$(get_node_info $node_num fabric_ip)
 
+  # Extract served model name from profile config for labeling
+  local served_name="unknown"
+  if [[ "$profile" != "unknown" ]]; then
+    local model_config="${MODELS[$profile]:-}"
+    if [[ -n "${model_config}" ]]; then
+      served_name=$(echo "$model_config" | grep "SERVED_MODEL_NAME=" | cut -d'=' -f2 | xargs)
+    fi
+  fi
+
   Log "Ensuring container on node ${node_num} (${node_name} @ ${node_ip})"
   Log "  Using image: ${image_name} → ${image_path}"
+  Log "  Profile: ${profile} (${served_name})"
   [[ -n "$head_fabric_ip" ]] && Log "  Ray head: ${head_fabric_ip}"
 
   # Remove old container if exists
@@ -70,6 +81,8 @@ ensure_container() {
   # Start container
   ssh admin@${node_ip} "sudo docker run -d \
     --name vllm-node-${node_num} \
+    --label vllm.profile=${profile} \
+    --label vllm.served_name=${served_name} \
     --gpus all \
     --ipc=host \
     --ulimit memlock=-1 \
@@ -126,7 +139,7 @@ cmd_start_cluster() {
   fi
 
   for i in $(seq 1 ${num_nodes}); do
-    ensure_container ${i} "${image_name}" "${head_fabric_ip}"
+    ensure_container ${i} "${image_name}" "${head_fabric_ip}" "${profile}"
   done
 
   Log "Containers ready. Use load-model to start cluster with model-specific Ray settings."
@@ -225,14 +238,28 @@ cmd_stop_model() {
 }
 
 cmd_status() {
+  Log "=== Cluster Container Status ==="
+  for node_num in 1 2 3 4; do
+    is_node_active $node_num || continue
+    local node_ip=$(get_node_info $node_num lan_ip)
+    local node_name=$(get_node_info $node_num name)
+    local status
+    status=$(ssh admin@${node_ip} "sudo docker ps --filter name=vllm-node-${node_num} --format '{{.Label \"vllm.profile\"}} ({{.Label \"vllm.served_name\"}}) {{.Image}} {{.Status}}'" 2>/dev/null)
+    if [[ -n "$status" ]]; then
+      Log "  Node ${node_num} (${node_name}): ${status}"
+    else
+      Log "  Node ${node_num} (${node_name}): no container"
+    fi
+  done
+
+  # Also show Ray/vLLM internal status from head node
   local head_node=1
   if [[ ${#ACTIVE_NODES[@]} -gt 0 ]]; then
     head_node="${ACTIVE_NODES[0]}"
   fi
-  
-  local node_ip=$(get_node_info $head_node lan_ip)
-  Log "Status from head node ${head_node}:"
-  ssh admin@${node_ip} "sudo docker exec vllm-node-${head_node} /opt/vllm_cluster.sh status" || true
+  local head_ip=$(get_node_info $head_node lan_ip)
+  Log "=== Ray Status (from node ${head_node}) ==="
+  ssh admin@${head_ip} "sudo docker exec vllm-node-${head_node} /opt/vllm_cluster.sh status" 2>/dev/null || Log "  (no running container on head node)"
 }
 
 cmd_stop_cluster() {
@@ -300,15 +327,15 @@ Image Selection:
     vllm-nvidia-official - nvcr.io/nvidia/vllm:25.09-py3
 
 Examples:
-  # Qwen3-VL-235B on nodes 1-2 (uses official v0.17.1 image)
+  # Qwen3-VL-235B on nodes 1-2 (uses proven v0.17.1 image)
   ./vllm_cluster_orchestrator.sh --nodes 1,2 start-cluster 2 qwen3-vl-235b
   ./vllm_cluster_orchestrator.sh --nodes 1,2 load-model qwen3-vl-235b
   
   # DeepSeek-V3-dense on all 4 nodes (uses GB10 community image with newer vLLM)
-  ./vllm_cluster_orchestrator.sh --nodes 1,2,3,4 start-cluster 4 deepseek-v3-dense
-  ./vllm_cluster_orchestrator.sh --nodes 1,2,3,4 load-model deepseek-v3-dense
+  ./vllm_cluster_orchestrator.sh start-cluster 4 deepseek-v3-dense
+  ./vllm_cluster_orchestrator.sh load-model deepseek-v3-dense
 
-  # Qwen3.5-122B on nodes 3-4 (uses official v0.17.1 image)
+  # Qwen3.5-122B on nodes 3-4 (uses GB10 community image)
   ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster 2 qwen3.5-122b
   ./vllm_cluster_orchestrator.sh --nodes 3,4 load-model qwen3.5-122b
 
