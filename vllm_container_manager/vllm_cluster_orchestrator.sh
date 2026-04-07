@@ -279,6 +279,53 @@ cmd_stop_cluster() {
   wait
 }
 
+# Known vLLM API ports to probe
+VLLM_PROBE_PORTS=(8000 8001 8002)
+
+cmd_details() {
+  Log "=== Cluster Details (probing API endpoints) ==="
+  for node_num in 1 2 3 4; do
+    is_node_active $node_num || continue
+    local node_ip=$(get_node_info $node_num lan_ip)
+    local node_name=$(get_node_info $node_num name)
+
+    # Check container labels first
+    local container_info
+    container_info=$(ssh admin@${node_ip} "sudo docker ps --filter name=vllm-node-${node_num} --format '{{.Label \"vllm.profile\"}}'" 2>/dev/null)
+    if [[ -z "$container_info" ]]; then
+      Log "  Node ${node_num} (${node_name}): no container"
+      continue
+    fi
+
+    Log "  Node ${node_num} (${node_name}) [profile: ${container_info}]:"
+
+    local found_any=0
+    for port in "${VLLM_PROBE_PORTS[@]}"; do
+      local response
+      response=$(curl -s --connect-timeout 2 --max-time 5 "http://${node_ip}:${port}/v1/models" 2>/dev/null)
+      if [[ -n "$response" ]] && echo "$response" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
+        local model_ids
+        model_ids=$(echo "$response" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for m in data.get('data', []):
+    print(m.get('id', '?'))
+" 2>/dev/null)
+        if [[ -n "$model_ids" ]]; then
+          found_any=1
+          while IFS= read -r model_id; do
+            Log "    :${port} → ${model_id}"
+          done <<< "$model_ids"
+        fi
+      fi
+    done
+
+    if [[ $found_any -eq 0 ]]; then
+      Log "    (container running, no API responding on ports ${VLLM_PROBE_PORTS[*]})"
+    fi
+  done
+}
+
 # Parse arguments
 COMMAND=""
 ARGS=()
@@ -289,7 +336,7 @@ while [[ $# -gt 0 ]]; do
       parse_node_filter "$2"
       shift 2
       ;;
-    start-cluster|load-model|stop-model|status|stop-cluster)
+    start-cluster|load-model|stop-model|status|details|stop-cluster)
       COMMAND="$1"
       shift
       ARGS=("$@")
@@ -310,7 +357,8 @@ Commands:
   start-cluster N [PROFILE]  - Start N-node cluster (optionally pre-configure for PROFILE)
   load-model PROFILE         - Load model from cluster_config.sh
   stop-model                 - Stop vLLM (keep Ray + containers)
-  status                     - Show cluster status
+  status                     - Show cluster container status + Ray info
+  details                    - Probe API endpoints, show served model names per node/port
   stop-cluster               - Stop all containers
 
 Node Filtering:
@@ -355,5 +403,6 @@ case "$COMMAND" in
   load-model) cmd_load_model "${ARGS[0]}" ;;
   stop-model) cmd_stop_model ;;
   status) cmd_status ;;
+  details) cmd_details ;;
   stop-cluster) cmd_stop_cluster ;;
 esac
