@@ -21,7 +21,7 @@ declare -gA CUSTOM_IMAGES=(
 
 declare -gA MODELS=(
   [qwen3-vl-235b]="
-    DOCKER_IMAGE=vllm-official
+    DOCKER_IMAGE=vllm-gb10-0.18.0_b2
     MODEL_DIR=/opt/ai-models/hf/qwen3/Qwen3-VL-235B-A22B-Thinking-AWQ
     SERVED_MODEL_NAME=chat-heavy,chat-heavy-qwen,qwen3-vl-235b-a22b
     TENSOR_PARALLEL_SIZE=2
