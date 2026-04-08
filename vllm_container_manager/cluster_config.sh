@@ -35,11 +35,11 @@ declare -gA MODELS=(
   # Qwen3 (standard transformer, NOT GDN — no Mamba quirks)
   # =========================================================================
 
-  # Qwen3-VL-235B: Vision+Language, TP=2, custom build for fp8 KV
-  # NOTE: Uses custom image for fp8 FlashInfer sm_121 kernels.
-  #       Qwen3 (not 3.5) so no GDN regression on v0.18.0.
+  # Qwen3-VL-235B: Vision+Language, TP=2
+  # NOTE: Qwen3 (not 3.5) so no GDN regression on v0.18.0.
+  # CUBLAS_STATUS_NOT_INITIALIZED on custom image — use stock only.
   [qwen3-vl-235b]="
-    DOCKER_IMAGE=vllm/vllm-openai:v0.17.1
+    DOCKER_IMAGE=vllm-official
     MODEL_DIR=/opt/ai-models/hf/qwen3/Qwen3-VL-235B-A22B-Thinking-AWQ
     SERVED_MODEL_NAME=chat-heavy,chat-heavy-qwen,qwen3-vl-235b-a22b
     TENSOR_PARALLEL_SIZE=2
@@ -171,13 +171,14 @@ declare -gA MODELS=(
     ENFORCE_EAGER=0
   "
 
-  # Qwen3.5-397B: Heavy mode, TP=3 (nodes 1-3), leaves node 4 free
-  # ~200GB model, ~67GB/node, ~42GB KV headroom/node at 0.85
+  # Qwen3.5-397B: Heavy mode, TP=4 (all nodes)
+  # 64 MoE experts requires TP divisible by 64 — TP=3 fails, TP=4 or TP=2 only
+  # ~200GB model, ~50GB/node at TP=4, ~59GB KV headroom/node at 0.85
   [qwen3.5-397b]="
     DOCKER_IMAGE=vllm-official
     MODEL_DIR=/opt/ai-models/hf/Intel/Qwen3.5-397B-A17B-int4-AutoRound
     SERVED_MODEL_NAME=chat-heavy,chat-heavy-qwen,qwen35-397b-a17b
-    TENSOR_PARALLEL_SIZE=3
+    TENSOR_PARALLEL_SIZE=4
     MAX_MODEL_LEN=250000
     MAX_NUM_SEQS=2
     MAX_NUM_BATCHED_TOKENS=8192
