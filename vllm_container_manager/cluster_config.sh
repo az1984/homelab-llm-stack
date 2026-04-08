@@ -39,7 +39,7 @@ declare -gA MODELS=(
   # NOTE: Uses custom image for fp8 FlashInfer sm_121 kernels.
   #       Qwen3 (not 3.5) so no GDN regression on v0.18.0.
   [qwen3-vl-235b]="
-    DOCKER_IMAGE=vllm-gb10-0.18.0_b2
+    DOCKER_IMAGE=vllm/vllm-openai:v0.17.1
     MODEL_DIR=/opt/ai-models/hf/qwen3/Qwen3-VL-235B-A22B-Thinking-AWQ
     SERVED_MODEL_NAME=chat-heavy,chat-heavy-qwen,qwen3-vl-235b-a22b
     TENSOR_PARALLEL_SIZE=2
@@ -49,7 +49,7 @@ declare -gA MODELS=(
     GPU_MEMORY_UTILIZATION=0.90
     ENABLE_PREFIX_CACHING=0
     ENABLE_CHUNKED_PREFILL=1
-    KV_CACHE_DTYPE=fp8
+    KV_CACHE_DTYPE=bfloat16
     TRUST_REMOTE_CODE=1
     ENABLE_AUTO_TOOL_CHOICE=1
     TOOL_CALL_PARSER=hermes
