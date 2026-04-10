@@ -150,10 +150,33 @@ declare -gA MODELS=(
   # Qwen3.5 (GDN/Mamba hybrid — stock v0.17.1 only, compressed-tensors)
   # =========================================================================
 
+  # Qwen3.5-9B: Vision (chat-peeks), single node, cohabits with TTS/STT/ComfyUI
+  # ~5GB model at 0.30 util = ~38GB to vLLM, leaves ~90GB for cohabitants
+  [qwen3.5-9b]="
+    DOCKER_IMAGE=vllm-official
+    MODEL_DIR=/opt/ai-models/hf/cyankiwi/Qwen3.5-9B-AWQ-4bit
+    SERVED_MODEL_NAME=chat-peeks,chat-peeks-qwen,qwen35-9b
+	AUTO_AWQ_MARLIN="${AUTO_AWQ_MARLIN:-0}"
+    TENSOR_PARALLEL_SIZE=1
+    MAX_MODEL_LEN=65536
+    MAX_NUM_SEQS=12
+    MAX_NUM_BATCHED_TOKENS=8192
+    GPU_MEMORY_UTILIZATION=0.30
+    ENABLE_PREFIX_CACHING=1
+    ENABLE_CHUNKED_PREFILL=1
+    KV_CACHE_DTYPE=auto
+    TRUST_REMOTE_CODE=1
+    ENABLE_AUTO_TOOL_CHOICE=1
+    TOOL_CALL_PARSER=hermes
+    VLLM_PORT=8002
+    RAY_OBJECT_STORE_GB=1
+    ENFORCE_EAGER=0
+  "
+  
   # Qwen3.5-122B: Daily driver, TP=2, aggressive 16-stream config
   # Perf: 1s=19.5t/s, 2s=39.4, 3s=49.2, 4s=59.5, 8s=94.4, 12s=115.2
   [qwen3.5-122b]="
-    DOCKER_IMAGE=vllm-official
+    DOCKER_IMAGE=vllm-community-eugr
     MODEL_DIR=/opt/ai-models/hf/cyankiwi/Qwen3.5-122B-A10B-AWQ-4bit
     SERVED_MODEL_NAME=chat-heavy,chat-heavy-qwen,qwen35-122b-a10b
 	AUTO_AWQ_MARLIN="${AUTO_AWQ_MARLIN:-0}"
@@ -177,7 +200,7 @@ declare -gA MODELS=(
   # 64 MoE experts requires TP divisible by 64 — TP=3 fails, TP=4 or TP=2 only
   # ~200GB model, ~50GB/node at TP=4, ~59GB KV headroom/node at 0.85
   [qwen3.5-397b]="
-    DOCKER_IMAGE=vllm-official
+    DOCKER_IMAGE=vllm-community-eugr
     MODEL_DIR=/opt/ai-models/hf/Intel/Qwen3.5-397B-A17B-int4-AutoRound
     SERVED_MODEL_NAME=chat-heavy,chat-heavy-qwen,qwen35-397b-a17b
 	AUTO_AWQ_MARLIN="${AUTO_AWQ_MARLIN:-0}"
@@ -194,29 +217,6 @@ declare -gA MODELS=(
     TOOL_CALL_PARSER=hermes
     VLLM_PORT=8000
     RAY_OBJECT_STORE_GB=2
-    ENFORCE_EAGER=0
-  "
-
-  # Qwen3.5-9B: Vision (chat-peeks), single node, cohabits with TTS/STT/ComfyUI
-  # ~5GB model at 0.30 util = ~38GB to vLLM, leaves ~90GB for cohabitants
-  [qwen3.5-9b]="
-    DOCKER_IMAGE=vllm-official
-    MODEL_DIR=/opt/ai-models/hf/cyankiwi/Qwen3.5-9B-AWQ-4bit
-    SERVED_MODEL_NAME=chat-peeks,chat-peeks-qwen,qwen35-9b
-	AUTO_AWQ_MARLIN="${AUTO_AWQ_MARLIN:-0}"
-    TENSOR_PARALLEL_SIZE=1
-    MAX_MODEL_LEN=65536
-    MAX_NUM_SEQS=12
-    MAX_NUM_BATCHED_TOKENS=8192
-    GPU_MEMORY_UTILIZATION=0.30
-    ENABLE_PREFIX_CACHING=1
-    ENABLE_CHUNKED_PREFILL=1
-    KV_CACHE_DTYPE=auto
-    TRUST_REMOTE_CODE=1
-    ENABLE_AUTO_TOOL_CHOICE=1
-    TOOL_CALL_PARSER=hermes
-    VLLM_PORT=8002
-    RAY_OBJECT_STORE_GB=1
     ENFORCE_EAGER=0
   "
 )
