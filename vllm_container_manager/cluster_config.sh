@@ -27,6 +27,7 @@ declare -gA CUSTOM_IMAGES=(
   [vllm-nvidia-official]="nvcr.io/nvidia/vllm:25.09-py3"
   [vllm-gb10-0.18.0]="192.168.2.42:5000/vllm-gb10:0.18.0"
   [vllm-gb10-0.18.0_b2]="192.168.2.42:5000/vllm-gb10:0.18.0_b2"
+  [vllm-community-eugr]="192.168.2.42:5000/vllm-community-eugr:latest"
 )
 
 declare -gA MODELS=(
@@ -172,7 +173,7 @@ declare -gA MODELS=(
     RAY_OBJECT_STORE_GB=1
     ENFORCE_EAGER=0
   "
-  
+
   # Qwen3.5-122B: Daily driver, TP=2, aggressive 16-stream config
   # Perf: 1s=19.5t/s, 2s=39.4, 3s=49.2, 4s=59.5, 8s=94.4, 12s=115.2
   [qwen3.5-122b]="
