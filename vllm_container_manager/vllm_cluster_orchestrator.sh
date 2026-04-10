@@ -78,6 +78,19 @@ ensure_container() {
   local env_ray_head=""
   [[ -n "$head_fabric_ip" ]] && env_ray_head="-e RAY_HEAD_IP=${head_fabric_ip}"
 
+  # Determine entrypoint: NGC images need their setup script, others use /bin/bash
+  local entrypoint="${IMAGE_ENTRYPOINTS[$image_name]:-}"
+  local entrypoint_args
+  if [[ -n "$entrypoint" ]]; then
+    entrypoint_args="--entrypoint ${entrypoint}"
+    local run_cmd="bash -c 'sleep infinity'"
+  else
+    entrypoint_args="--entrypoint /bin/bash"
+    local run_cmd="-c 'sleep infinity'"
+  fi
+
+  Log "  Entrypoint: ${entrypoint:-/bin/bash (default)}"
+
   # Start container
   ssh admin@${node_ip} "sudo docker run -d \
     --name vllm-node-${node_num} \
@@ -101,9 +114,9 @@ ensure_container() {
     -v /opt/ai-tools/run:/opt/ai-tools/run \
     -v /opt/ai-tools/cache/triton:/root/.triton/cache \
     -v /tmp/vllm_cluster_mgr.sh:/opt/vllm_cluster.sh:ro \
-    --entrypoint /bin/bash \
+    ${entrypoint_args} \
     ${image_path} \
-    -c 'sleep infinity'"
+    ${run_cmd}"
 
   Log "  Container started"
 }
