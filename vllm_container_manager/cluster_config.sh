@@ -187,23 +187,46 @@ declare -gA MODELS=(
   # Perf (stock v0.17.1): 1s=19.5t/s, 2s=39.4, 3s=49.2, 4s=59.5, 8s=94.4, 12s=115.2
   # eugr community benchmarks: ~56 tok/s dual Spark — expect significant improvement
   [qwen3.5-122b]="
-    DOCKER_IMAGE=vllm-official
+    DOCKER_IMAGE=vllm-community-eugr
     MODEL_DIR=/opt/ai-models/hf/cyankiwi/Qwen3.5-122B-A10B-AWQ-4bit
     SERVED_MODEL_NAME=chat-heavy,chat-heavy-qwen,qwen35-122b-a10b
     AUTO_AWQ_MARLIN=0
     TENSOR_PARALLEL_SIZE=2
     MAX_MODEL_LEN=250000
-    MAX_NUM_SEQS=16
-    MAX_NUM_BATCHED_TOKENS=8192
-    GPU_MEMORY_UTILIZATION=0.85
+    MAX_NUM_SEQS=12
+	MAX_NUM_BATCHED_TOKENS=8192
+	GPU_MEMORY_UTILIZATION=0.80
     ENABLE_PREFIX_CACHING=1
     ENABLE_CHUNKED_PREFILL=1
-    KV_CACHE_DTYPE=auto
+    KV_CACHE_DTYPE=fp8
+    TRUST_REMOTE_CODE=1
+	ENABLE_AUTO_TOOL_CHOICE=1
+	TOOL_CALL_PARSER=hermes
+	VLLM_PORT=8000
+ 	RAY_OBJECT_STORE_GB=2
+ 	ENFORCE_EAGER=0
+  "
+
+  # Qwen3.5-122B: Single-node, TP=1, HAProxy load-balanced pair
+  # Community benchmark: ~38 tok/s single-stream on single Spark
+  [qwen3.5-122b-solo]="
+    DOCKER_IMAGE=vllm-community-eugr
+    MODEL_DIR=/opt/ai-models/hf/cyankiwi/Qwen3.5-122B-A10B-AWQ-4bit
+    SERVED_MODEL_NAME=chat-heavy,chat-heavy-qwen,qwen35-122b-a10b
+    AUTO_AWQ_MARLIN=0
+    TENSOR_PARALLEL_SIZE=1
+    MAX_MODEL_LEN=250000
+    MAX_NUM_SEQS=4
+    MAX_NUM_BATCHED_TOKENS=8192
+    GPU_MEMORY_UTILIZATION=0.75
+    ENABLE_PREFIX_CACHING=1
+    ENABLE_CHUNKED_PREFILL=1
+    KV_CACHE_DTYPE=fp8
     TRUST_REMOTE_CODE=1
     ENABLE_AUTO_TOOL_CHOICE=1
     TOOL_CALL_PARSER=hermes
     VLLM_PORT=8000
-    RAY_OBJECT_STORE_GB=2
+    RAY_OBJECT_STORE_GB=1
     ENFORCE_EAGER=0
   "
 
