@@ -97,6 +97,7 @@ ensure_container() {
     --label vllm.profile=${profile} \
     --label vllm.served_name=${served_name} \
     --gpus all \
+    --device /dev/infiniband \
     --ipc=host \
     --ulimit memlock=-1 \
     --ulimit stack=67108864 \
