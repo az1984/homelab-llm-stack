@@ -101,7 +101,8 @@ fi
 # Miscellaneous
 # ==============================================================================
 VLLM_EXTRA_ARGS="${VLLM_EXTRA_ARGS:-}"
-SPECULATIVE_CONFIG="${SPECULATIVE_CONFIG:-}"
+SPECULATIVE_METHOD="${SPECULATIVE_METHOD:-}"
+SPECULATIVE_NUM_TOKENS="${SPECULATIVE_NUM_TOKENS:-}"
 VLLM_LOGFILE="${VLLM_LOGFILE:-${LOG_DIR}/vllm_${SERVED_MODEL_NAME}_node${THIS_NODE}.log}"
 RAY_LOGFILE="${RAY_LOGFILE:-${LOG_DIR}/ray_node${THIS_NODE}.log}"
 
@@ -257,7 +258,6 @@ BuildVLLMArgs() {
     --model "${MODEL_DIR}"
     --host "${VLLM_HOST}"
     --port "${VLLM_PORT}"
-    --served-model-name "${SERVED_MODEL_NAME}"
     --dtype "${DTYPE}"
     --max-model-len "${MAX_MODEL_LEN}"
     --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}"
@@ -265,6 +265,12 @@ BuildVLLMArgs() {
     --tensor-parallel-size "${TENSOR_PARALLEL_SIZE}"
     --pipeline-parallel-size "${PIPELINE_PARALLEL_SIZE}"
   )
+  
+  # Split comma-separated model names into separate flags
+  IFS=',' read -ra model_names <<< "${SERVED_MODEL_NAME}"
+  for name in "${model_names[@]}"; do
+    args+=(--served-model-name "${name}")
+  done
   
   [[ -n "${MAX_NUM_SEQS}" ]] && args+=(--max-num-seqs "${MAX_NUM_SEQS}")
   [[ -n "${MAX_NUM_BATCHED_TOKENS}" ]] && args+=(--max-num-batched-tokens "${MAX_NUM_BATCHED_TOKENS}")
@@ -285,7 +291,10 @@ BuildVLLMArgs() {
   [[ -n "${QUANTIZATION}" ]] && args+=(--quantization "${QUANTIZATION}")
   
   # Speculative decoding (MTP)
-  [[ -n "${SPECULATIVE_CONFIG}" ]] && args+=(--speculative-config "'${SPECULATIVE_CONFIG}'")
+  if [[ -n "${SPECULATIVE_METHOD}" ]]; then
+    local spec_json="{\"method\":\"${SPECULATIVE_METHOD}\",\"num_speculative_tokens\":${SPECULATIVE_NUM_TOKENS:-1}}"
+    args+=(--speculative-config "${spec_json}")
+  fi
 
   if [[ -n "${VLLM_EXTRA_ARGS}" ]]; then
     # shellcheck disable=SC2206

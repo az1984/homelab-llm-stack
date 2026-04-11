@@ -170,7 +170,7 @@ declare -gA MODELS=(
   #         ./vllm_cluster_orchestrator.sh --nodes 2 start-cluster 1 qwen3.5-122b-v2
   [qwen3.5-122b-v2]="
     DOCKER_IMAGE=vllm-qwen35-v2
-    MODEL_DIR=/opt/ai-models/hf/local/qwen35-122b-hybrid-int4fp8
+    MODEL_DIR=/opt/ai-models/local/qwen35-122b-hybrid-int4fp8
     SERVED_MODEL_NAME=chat-heavy,chat-heavy-qwen,qwen35-122b-a10b
     AUTO_AWQ_MARLIN=0
     TENSOR_PARALLEL_SIZE=1
@@ -187,7 +187,8 @@ declare -gA MODELS=(
     VLLM_PORT=8000
     RAY_OBJECT_STORE_GB=1
     ENFORCE_EAGER=0
-    SPECULATIVE_CONFIG={\"method\":\"mtp\",\"num_speculative_tokens\":2}
+    SPECULATIVE_METHOD=mtp
+    SPECULATIVE_NUM_TOKENS=2
   "
 
   # Qwen3.5-122B: TP=2 fallback (eugr image, no MTP, cyankiwi model)
