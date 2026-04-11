@@ -157,29 +157,6 @@ declare -gA MODELS=(
   # Qwen3.5 (GDN/Mamba hybrid — compressed-tensors quant format)
   # =========================================================================
 
-  # Qwen3.5-122B: Daily driver, TP=2, aggressive 16-stream config
-  # Perf (stock v0.17.1): 1s=19.5t/s, 2s=39.4, 3s=49.2, 4s=59.5, 8s=94.4, 12s=115.2
-  # eugr community benchmarks: ~56 tok/s dual Spark — expect significant improvement
-  [qwen3.5-122b]="
-    DOCKER_IMAGE=vllm-community-eugr
-    MODEL_DIR=/opt/ai-models/hf/cyankiwi/Qwen3.5-122B-A10B-AWQ-4bit
-    SERVED_MODEL_NAME=chat-heavy,chat-heavy-qwen,qwen35-122b-a10b
-    AUTO_AWQ_MARLIN=0
-    TENSOR_PARALLEL_SIZE=2
-    MAX_MODEL_LEN=250000
-    MAX_NUM_SEQS=16
-    MAX_NUM_BATCHED_TOKENS=8192
-    GPU_MEMORY_UTILIZATION=0.85
-    ENABLE_PREFIX_CACHING=1
-    ENABLE_CHUNKED_PREFILL=1
-    KV_CACHE_DTYPE=auto
-    TRUST_REMOTE_CODE=1
-    ENABLE_AUTO_TOOL_CHOICE=1
-    TOOL_CALL_PARSER=hermes
-    VLLM_PORT=8000
-    RAY_OBJECT_STORE_GB=2
-    ENFORCE_EAGER=0
-  "
 
   # Qwen3.5-397B: Heavy mode, TP=4 (all nodes)
   # 64 MoE experts requires TP divisible by 64 — TP=3 fails, TP=4 or TP=2 only
@@ -193,6 +170,30 @@ declare -gA MODELS=(
     TENSOR_PARALLEL_SIZE=4
     MAX_MODEL_LEN=250000
     MAX_NUM_SEQS=2
+    MAX_NUM_BATCHED_TOKENS=8192
+    GPU_MEMORY_UTILIZATION=0.85
+    ENABLE_PREFIX_CACHING=1
+    ENABLE_CHUNKED_PREFILL=1
+    KV_CACHE_DTYPE=auto
+    TRUST_REMOTE_CODE=1
+    ENABLE_AUTO_TOOL_CHOICE=1
+    TOOL_CALL_PARSER=hermes
+    VLLM_PORT=8000
+    RAY_OBJECT_STORE_GB=2
+    ENFORCE_EAGER=0
+  "
+
+  # Qwen3.5-122B: Daily driver, TP=2, aggressive 16-stream config
+  # Perf (stock v0.17.1): 1s=19.5t/s, 2s=39.4, 3s=49.2, 4s=59.5, 8s=94.4, 12s=115.2
+  # eugr community benchmarks: ~56 tok/s dual Spark — expect significant improvement
+  [qwen3.5-122b]="
+    DOCKER_IMAGE=vllm-official
+    MODEL_DIR=/opt/ai-models/hf/cyankiwi/Qwen3.5-122B-A10B-AWQ-4bit
+    SERVED_MODEL_NAME=chat-heavy,chat-heavy-qwen,qwen35-122b-a10b
+    AUTO_AWQ_MARLIN=0
+    TENSOR_PARALLEL_SIZE=2
+    MAX_MODEL_LEN=250000
+    MAX_NUM_SEQS=16
     MAX_NUM_BATCHED_TOKENS=8192
     GPU_MEMORY_UTILIZATION=0.85
     ENABLE_PREFIX_CACHING=1
