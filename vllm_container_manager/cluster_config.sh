@@ -8,8 +8,8 @@
 # Qwen3.5 GDN/Mamba notes:
 #   - compressed-tensors quant format: do NOT set QUANTIZATION flag
 #   - MAX_NUM_BATCHED_TOKENS>=8192 required (Mamba block_size=4176)
-#   - GPU_MEMORY_UTILIZATION=0.85 max (0.90 triggers Ray OOM on unified memory)
-#   - KV_CACHE_DTYPE=auto on stock v0.17.1 (fp8 FlashInfer lacks sm_121 kernels)
+#   - GPU_MEMORY_UTILIZATION=0.80 recommended (unified memory + Ray OOM at 0.95)
+#   - RAY_memory_usage_threshold=0.98 set in orchestrator for all profiles
 
 declare -gA NODES=(
   [1]="192.168.2.42:magnesium:10.10.10.1"
@@ -28,6 +28,9 @@ declare -gA CUSTOM_IMAGES=(
   [vllm-gb10-0.18.0]="192.168.2.42:5000/vllm-gb10:0.18.0"
   [vllm-gb10-0.18.0_b2]="192.168.2.42:5000/vllm-gb10:0.18.0_b2"
   [vllm-community-eugr]="192.168.2.42:5000/vllm-community-eugr:latest"
+  [vllm-qwen35-v2]="192.168.2.42:5000/vllm-qwen35-v2:latest"
+  [vllm-sm121]="192.168.2.42:5000/vllm-sm121:latest"
+  [vllm-sm121-397b]="192.168.2.42:5000/vllm-sm121-397b:latest"
 )
 
 # Images that require a specific entrypoint (NGC-based images need their setup script)
@@ -35,6 +38,9 @@ declare -gA CUSTOM_IMAGES=(
 declare -gA IMAGE_ENTRYPOINTS=(
   [vllm-community-eugr]="/opt/nvidia/nvidia_entrypoint.sh"
   [vllm-nvidia-official]="/opt/nvidia/nvidia_entrypoint.sh"
+  [vllm-qwen35-v2]="/opt/nvidia/nvidia_entrypoint.sh"
+  [vllm-sm121]="/opt/nvidia/nvidia_entrypoint.sh"
+  [vllm-sm121-397b]="/opt/nvidia/nvidia_entrypoint.sh"
 )
 
 declare -gA MODELS=(
@@ -54,7 +60,7 @@ declare -gA MODELS=(
     QUANTIZATION=awq_marlin
     MAX_MODEL_LEN=200000
     MAX_NUM_SEQS=2
-    GPU_MEMORY_UTILIZATION=0.90
+    GPU_MEMORY_UTILIZATION=0.80
     ENABLE_PREFIX_CACHING=0
     ENABLE_CHUNKED_PREFILL=1
     KV_CACHE_DTYPE=bfloat16
@@ -157,68 +163,21 @@ declare -gA MODELS=(
   # Qwen3.5 (GDN/Mamba hybrid — compressed-tensors quant format)
   # =========================================================================
 
-
-  # Qwen3.5-397B: Heavy mode, TP=4 (all nodes)
-  # 64 MoE experts requires TP divisible by 64 — TP=3 fails, TP=4 or TP=2 only
-  # ~200GB model, ~50GB/node at TP=4, ~59GB KV headroom/node at 0.85
-  # eugr community benchmarks: ~37 tok/s single-stream, ~103 tok/s aggregate (4 users)
-  [qwen3.5-397b]="
-    DOCKER_IMAGE=vllm-community-eugr
-    MODEL_DIR=/opt/ai-models/hf/Intel/Qwen3.5-397B-A17B-int4-AutoRound
-    SERVED_MODEL_NAME=chat-heavy,chat-heavy-qwen,qwen35-397b-a17b
-    AUTO_AWQ_MARLIN=0
-    TENSOR_PARALLEL_SIZE=4
-    MAX_MODEL_LEN=250000
-    MAX_NUM_SEQS=2
-    MAX_NUM_BATCHED_TOKENS=8192
-    GPU_MEMORY_UTILIZATION=0.85
-    ENABLE_PREFIX_CACHING=1
-    ENABLE_CHUNKED_PREFILL=1
-    KV_CACHE_DTYPE=auto
-    TRUST_REMOTE_CODE=1
-    ENABLE_AUTO_TOOL_CHOICE=1
-    TOOL_CALL_PARSER=hermes
-    VLLM_PORT=8000
-    RAY_OBJECT_STORE_GB=2
-    ENFORCE_EAGER=0
-  "
-
-  # Qwen3.5-122B: Daily driver, TP=2, aggressive 16-stream config
-  # Perf (stock v0.17.1): 1s=19.5t/s, 2s=39.4, 3s=49.2, 4s=59.5, 8s=94.4, 12s=115.2
-  # eugr community benchmarks: ~56 tok/s dual Spark — expect significant improvement
-  [qwen3.5-122b]="
-    DOCKER_IMAGE=vllm-community-eugr
-    MODEL_DIR=/opt/ai-models/hf/cyankiwi/Qwen3.5-122B-A10B-AWQ-4bit
-    SERVED_MODEL_NAME=chat-heavy,chat-heavy-qwen,qwen35-122b-a10b
-    AUTO_AWQ_MARLIN=0
-    TENSOR_PARALLEL_SIZE=2
-    MAX_MODEL_LEN=250000
-    MAX_NUM_SEQS=12
-	MAX_NUM_BATCHED_TOKENS=8192
-	GPU_MEMORY_UTILIZATION=0.80
-    ENABLE_PREFIX_CACHING=1
-    ENABLE_CHUNKED_PREFILL=1
-    KV_CACHE_DTYPE=fp8
-    TRUST_REMOTE_CODE=1
-	ENABLE_AUTO_TOOL_CHOICE=1
-	TOOL_CALL_PARSER=hermes
-	VLLM_PORT=8000
- 	RAY_OBJECT_STORE_GB=2
- 	ENFORCE_EAGER=0
-  "
-
-  # Qwen3.5-122B: Single-node, TP=1, HAProxy load-balanced pair
-  # Community benchmark: ~38 tok/s single-stream on single Spark
-  [qwen3.5-122b-solo]="
-    DOCKER_IMAGE=vllm-community-eugr
-    MODEL_DIR=/opt/ai-models/hf/cyankiwi/Qwen3.5-122B-A10B-AWQ-4bit
+  # Qwen3.5-122B v2: PRODUCTION — Albond hybrid INT4+FP8 + MTP-2
+  # TP=1 per node, HAProxy load-balances across independent nodes
+  # Perf: 29-44 tok/s single-stream (MTP-2, 95-100% acceptance rate)
+  # Deploy: ./vllm_cluster_orchestrator.sh --nodes 1 start-cluster 1 qwen3.5-122b-v2
+  #         ./vllm_cluster_orchestrator.sh --nodes 2 start-cluster 1 qwen3.5-122b-v2
+  [qwen3.5-122b-v2]="
+    DOCKER_IMAGE=vllm-qwen35-v2
+    MODEL_DIR=/opt/ai-models/hf/local/qwen35-122b-hybrid-int4fp8
     SERVED_MODEL_NAME=chat-heavy,chat-heavy-qwen,qwen35-122b-a10b
     AUTO_AWQ_MARLIN=0
     TENSOR_PARALLEL_SIZE=1
     MAX_MODEL_LEN=250000
     MAX_NUM_SEQS=4
     MAX_NUM_BATCHED_TOKENS=8192
-    GPU_MEMORY_UTILIZATION=0.75
+    GPU_MEMORY_UTILIZATION=0.80
     ENABLE_PREFIX_CACHING=1
     ENABLE_CHUNKED_PREFILL=1
     KV_CACHE_DTYPE=fp8
@@ -227,6 +186,58 @@ declare -gA MODELS=(
     TOOL_CALL_PARSER=hermes
     VLLM_PORT=8000
     RAY_OBJECT_STORE_GB=1
+    ENFORCE_EAGER=0
+    SPECULATIVE_CONFIG={\"method\":\"mtp\",\"num_speculative_tokens\":2}
+  "
+
+  # Qwen3.5-122B: TP=2 fallback (eugr image, no MTP, cyankiwi model)
+  # Use if hybrid model not yet distributed or for quick testing
+  # Perf: 22 tok/s single-stream with IB + fp8 KV
+  [qwen3.5-122b]="
+    DOCKER_IMAGE=vllm-community-eugr
+    MODEL_DIR=/opt/ai-models/hf/cyankiwi/Qwen3.5-122B-A10B-AWQ-4bit
+    SERVED_MODEL_NAME=chat-heavy,chat-heavy-qwen,qwen35-122b-a10b
+    AUTO_AWQ_MARLIN=0
+    TENSOR_PARALLEL_SIZE=2
+    MAX_MODEL_LEN=250000
+    MAX_NUM_SEQS=12
+    MAX_NUM_BATCHED_TOKENS=8192
+    GPU_MEMORY_UTILIZATION=0.80
+    ENABLE_PREFIX_CACHING=1
+    ENABLE_CHUNKED_PREFILL=1
+    KV_CACHE_DTYPE=fp8
+    TRUST_REMOTE_CODE=1
+    ENABLE_AUTO_TOOL_CHOICE=1
+    TOOL_CALL_PARSER=hermes
+    VLLM_PORT=8000
+    RAY_OBJECT_STORE_GB=2
+    ENFORCE_EAGER=0
+  "
+
+  # Qwen3.5-397B: Heavy mode, TP=4 (all nodes)
+  # 64 MoE experts requires TP divisible by 64 — TP=3 fails, TP=4 or TP=2 only
+  # ~200GB model, ~50GB/node at TP=4, ~59GB KV headroom/node at 0.80
+  # eugr community benchmarks: ~37 tok/s single-stream, ~103 tok/s aggregate (4 users)
+  # Requires vllm-sm121-397b (sm121 base + Marlin TP=4 fix + AutoRound ROPE fix)
+  # TODO: build vllm-sm121-397b — see CLUSTER_README.md Step 2
+  [qwen3.5-397b]="
+    DOCKER_IMAGE=vllm-sm121-397b
+    MODEL_DIR=/opt/ai-models/hf/Intel/Qwen3.5-397B-A17B-int4-AutoRound
+    SERVED_MODEL_NAME=chat-heavy,chat-heavy-qwen,qwen35-397b-a17b
+    AUTO_AWQ_MARLIN=0
+    TENSOR_PARALLEL_SIZE=4
+    MAX_MODEL_LEN=250000
+    MAX_NUM_SEQS=2
+    MAX_NUM_BATCHED_TOKENS=8192
+    GPU_MEMORY_UTILIZATION=0.80
+    ENABLE_PREFIX_CACHING=1
+    ENABLE_CHUNKED_PREFILL=1
+    KV_CACHE_DTYPE=fp8
+    TRUST_REMOTE_CODE=1
+    ENABLE_AUTO_TOOL_CHOICE=1
+    TOOL_CALL_PARSER=hermes
+    VLLM_PORT=8000
+    RAY_OBJECT_STORE_GB=2
     ENFORCE_EAGER=0
   "
 

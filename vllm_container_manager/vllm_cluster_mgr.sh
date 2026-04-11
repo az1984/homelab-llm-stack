@@ -101,6 +101,7 @@ fi
 # Miscellaneous
 # ==============================================================================
 VLLM_EXTRA_ARGS="${VLLM_EXTRA_ARGS:-}"
+SPECULATIVE_CONFIG="${SPECULATIVE_CONFIG:-}"
 VLLM_LOGFILE="${VLLM_LOGFILE:-${LOG_DIR}/vllm_${SERVED_MODEL_NAME}_node${THIS_NODE}.log}"
 RAY_LOGFILE="${RAY_LOGFILE:-${LOG_DIR}/ray_node${THIS_NODE}.log}"
 
@@ -109,6 +110,10 @@ RAY_LOGFILE="${RAY_LOGFILE:-${LOG_DIR}/ray_node${THIS_NODE}.log}"
 # ==============================================================================
 Log() { echo "[vllm-mgr] $*"; }
 Die() { echo "[vllm-mgr] ERROR: $*" >&2; exit 1; }
+
+IsHeadNode() {
+  [[ "${RAY_NODE_IP}" == "${RAY_HEAD_IP}" ]]
+}
 
 EnsureDirs() {
   mkdir -p "${STATE_DIR}" "${LOG_DIR}" 2>/dev/null || true
@@ -161,8 +166,8 @@ ExportRuntimeEnv() {
     [[ -n "${RAY_NODE_IP}" ]] || Die "Could not auto-detect RAY_NODE_IP (set it manually)"
   fi
   
-  # Head IP defaults to node IP on node 1
-  if [[ "${THIS_NODE}" == "1" ]] && [[ -z "${RAY_HEAD_IP}" ]]; then
+  # Head IP defaults to this node's IP if not set (meaning we ARE the head)
+  if [[ -z "${RAY_HEAD_IP}" ]]; then
     RAY_HEAD_IP="${RAY_NODE_IP}"
   fi
   
@@ -279,6 +284,9 @@ BuildVLLMArgs() {
   fi
   [[ -n "${QUANTIZATION}" ]] && args+=(--quantization "${QUANTIZATION}")
   
+  # Speculative decoding (MTP)
+  [[ -n "${SPECULATIVE_CONFIG}" ]] && args+=(--speculative-config "'${SPECULATIVE_CONFIG}'")
+
   if [[ -n "${VLLM_EXTRA_ARGS}" ]]; then
     # shellcheck disable=SC2206
     args+=(${VLLM_EXTRA_ARGS})
@@ -288,13 +296,24 @@ BuildVLLMArgs() {
 }
 
 LoadModel() {
-  [[ "${THIS_NODE}" == "1" ]] || Die "load-model must run on head node (THIS_NODE=1)"
+  IsHeadNode || Die "load-model must run on head node (this=${RAY_NODE_IP}, head=${RAY_HEAD_IP})"
   
   local old_pid
   old_pid="$(ReadPIDFile "${VLLM_PIDFILE}" || true)"
   if [[ -n "${old_pid}" ]] && IsPIDRunning "${old_pid}"; then
     Die "vLLM already running (pid=${old_pid}). Stop it first with: stop-model"
   fi
+  
+  # Rotate log: timestamped file + _latest symlink
+  local timestamp
+  timestamp="$(date +%Y%m%d_%H%M%S)"
+  local log_base="${LOG_DIR}/vllm_${SERVED_MODEL_NAME}_node${THIS_NODE}"
+  local timestamped_log="${log_base}_${timestamp}.log"
+  local latest_link="${log_base}_latest.log"
+  VLLM_LOGFILE="${timestamped_log}"
+  ln -sfn "${timestamped_log}" "${latest_link}"
+  Log "Log file: ${timestamped_log}"
+  Log "  Symlink: ${latest_link}"
   
   Log "Loading model: ${MODEL_DIR}"
   Log "  Served as: ${SERVED_MODEL_NAME}"
@@ -309,7 +328,6 @@ LoadModel() {
   
   Log "vLLM started (pid=${pid})"
   Log "API endpoint: http://${RAY_NODE_IP}:${VLLM_PORT}/v1"
-  Log "Log file: ${VLLM_LOGFILE}"
 }
 
 StopModel() {
@@ -337,7 +355,7 @@ CMDStartRay() {
   ExportRuntimeEnv
   PrintEnvSummary
   
-  if [[ "${THIS_NODE}" == "1" ]]; then
+  if IsHeadNode; then
     StartRayHead
   else
     StartRayWorker
@@ -352,14 +370,6 @@ CMDLoadModel() {
 }
 
 CMDStopModel() {
-  # Rotate logs before stopping
-  if [[ -f "${VLLM_LOGFILE}" ]]; then
-    local timestamp=$(date +%Y%m%d_%H%M%S)
-    local rotated_log="${VLLM_LOGFILE}.${timestamp}"
-    Log "Rotating log: ${VLLM_LOGFILE} -> ${rotated_log}"
-    mv "${VLLM_LOGFILE}" "${rotated_log}"
-  fi
-  
   StopModel
 }
 

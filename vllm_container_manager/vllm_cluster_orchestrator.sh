@@ -37,9 +37,9 @@ get_node_info() {
 
 ensure_container() {
   local node_num=$1
-  local image_name=${2:-$DEFAULT_VLLM_IMAGE}  # Use default if not specified
-  local head_fabric_ip=${3:-}  # Ray head IP (optional, set by start-cluster)
-  local profile=${4:-unknown}  # Model profile name for labeling
+  local image_name=${2:-$DEFAULT_VLLM_IMAGE}
+  local head_fabric_ip=${3:-}
+  local profile=${4:-unknown}
   
   # Skip if not in active nodes
   is_node_active $node_num || { Log "Skipping node $node_num (filtered)"; return 0; }
@@ -51,12 +51,19 @@ ensure_container() {
   local node_ip=$(get_node_info $node_num lan_ip)
   local fabric_ip=$(get_node_info $node_num fabric_ip)
 
-  # Extract served model name from profile config for labeling
+  # Extract served model name and build profile env args for baking into container
   local served_name="unknown"
+  local profile_env_args=""
   if [[ "$profile" != "unknown" ]]; then
     local model_config="${MODELS[$profile]:-}"
     if [[ -n "${model_config}" ]]; then
       served_name=$(echo "$model_config" | grep "SERVED_MODEL_NAME=" | cut -d'=' -f2 | xargs)
+      # Bake all profile env vars into the container
+      while IFS='=' read -r key value; do
+        key=$(echo "$key" | xargs)
+        value=$(echo "$value" | xargs)
+        [[ -n "$key" && -n "$value" ]] && profile_env_args="${profile_env_args} -e ${key}=${value}"
+      done <<< "${model_config}"
     fi
   fi
 
@@ -106,10 +113,12 @@ ensure_container() {
     -e THIS_NODE=${node_num} \
     -e RAY_NODE_IP=${fabric_ip} \
     ${env_ray_head} \
+    -e RAY_memory_usage_threshold=0.98 \
     -e NCCL_SOCKET_IFNAME=enp1s0f0np0 \
     -e NCCL_IB_DISABLE=0 \
     -e NCCL_IB_HCA=rocep1s0f0 \
     -e NCCL_DEBUG=INFO \
+    ${profile_env_args} \
     -v /opt/ai-models:/opt/ai-models:ro \
     -v /opt/ai-tools/logs:/opt/ai-tools/logs \
     -v /opt/ai-tools/run:/opt/ai-tools/run \
@@ -124,7 +133,7 @@ ensure_container() {
 
 cmd_start_cluster() {
   local num_nodes=${1:-2}
-  local profile=${2:-}  # Optional: pre-load model profile to get image
+  local profile=${2:-}
   
   Log "=== Starting ${num_nodes}-node cluster ==="
   
@@ -152,9 +161,16 @@ cmd_start_cluster() {
     fi
   fi
 
-  for i in $(seq 1 ${num_nodes}); do
-    ensure_container ${i} "${image_name}" "${head_fabric_ip}" "${profile}"
-  done
+  # Use active nodes if filtered, otherwise sequential
+  if [[ ${#ACTIVE_NODES[@]} -gt 0 ]]; then
+    for node_num in "${ACTIVE_NODES[@]}"; do
+      ensure_container ${node_num} "${image_name}" "${head_fabric_ip}" "${profile}"
+    done
+  else
+    for i in $(seq 1 ${num_nodes}); do
+      ensure_container ${i} "${image_name}" "${head_fabric_ip}" "${profile}"
+    done
+  fi
 
   Log "Containers ready. Use load-model to start cluster with model-specific Ray settings."
 }
@@ -228,7 +244,8 @@ cmd_load_model() {
   Log "Waiting for Ray to stabilize (5s)"
   sleep 5
   
-  # Build env args for vLLM
+  # Build env args for vLLM (profile vars already baked into container,
+  # but pass them again on exec for any that might be overridden)
   local env_args="-e RAY_HEAD_IP=${head_fabric_ip}"
   while IFS='=' read -r key value; do
     key=$(echo "$key" | xargs)
@@ -377,37 +394,31 @@ Commands:
 
 Node Filtering:
   --nodes 1,2        - Only use nodes 1 and 2
-  --nodes 3,4        - Only use nodes 3 and 4
+  --nodes 3          - Single node deployment
 
-Image Selection:
-  Each model profile in cluster_config.sh can specify DOCKER_IMAGE=name
-  Images are defined in CUSTOM_IMAGES map in cluster_config.sh
-  
-  Current images:
-    vllm-official        - vllm/vllm-openai:v0.17.1 (proven for Qwen3-VL-235B)
-    vllm-gb10-community  - scitrera/dgx-spark-vllm:0.14.0rc2-t5 (for DeepSeek-V3, R1, Qwen3.5)
-    vllm-nvidia-official - nvcr.io/nvidia/vllm:25.09-py3
+Profiles:
+  qwen3.5-122b-v2   - PRODUCTION: Albond hybrid + MTP-2, TP=1, 29-44 tok/s
+                       Deploy as independent pair behind HAProxy:
+                         --nodes 1 start-cluster 1 qwen3.5-122b-v2
+                         --nodes 2 start-cluster 1 qwen3.5-122b-v2
+  qwen3.5-122b      - Fallback: eugr image, TP=2, cyankiwi model, 22 tok/s
+  qwen3.5-397b      - Heavy mode: TP=4, all nodes, ~37 tok/s (needs vllm-sm121-397b)
+  qwen3.5-9b        - Vision: TP=1, port 8002, cohabits with other services
 
 Examples:
-  # Qwen3-VL-235B on nodes 1-2 (uses proven v0.17.1 image)
-  ./vllm_cluster_orchestrator.sh --nodes 1,2 start-cluster 2 qwen3-vl-235b
-  ./vllm_cluster_orchestrator.sh --nodes 1,2 load-model qwen3-vl-235b
-  
-  # DeepSeek-V3-dense on all 4 nodes (uses GB10 community image with newer vLLM)
-  ./vllm_cluster_orchestrator.sh start-cluster 4 deepseek-v3-dense
-  ./vllm_cluster_orchestrator.sh load-model deepseek-v3-dense
+  # Production 122B: two independent TP=1 nodes behind HAProxy
+  ./vllm_cluster_orchestrator.sh --nodes 1 start-cluster 1 qwen3.5-122b-v2
+  ./vllm_cluster_orchestrator.sh --nodes 1 load-model qwen3.5-122b-v2
+  ./vllm_cluster_orchestrator.sh --nodes 2 start-cluster 1 qwen3.5-122b-v2
+  ./vllm_cluster_orchestrator.sh --nodes 2 load-model qwen3.5-122b-v2
 
-  # Qwen3.5-122B on nodes 3-4 (uses GB10 community image)
-  ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster 2 qwen3.5-122b
-  ./vllm_cluster_orchestrator.sh --nodes 3,4 load-model qwen3.5-122b
+  # 397B heavy mode (all nodes)
+  ./vllm_cluster_orchestrator.sh --nodes 1,2,3,4 start-cluster 4 qwen3.5-397b
+  ./vllm_cluster_orchestrator.sh --nodes 1,2,3,4 load-model qwen3.5-397b
 
-  # Run both simultaneously on different node pairs:
-  ./vllm_cluster_orchestrator.sh --nodes 1,2 start-cluster 2 qwen3-vl-235b
-  ./vllm_cluster_orchestrator.sh --nodes 1,2 load-model qwen3-vl-235b
-  
-  ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster 2 qwen3.5-122b
-  ./vllm_cluster_orchestrator.sh --nodes 3,4 load-model qwen3.5-122b
-  # Now you have both running!
+  # Fallback 122B on TP=2
+  ./vllm_cluster_orchestrator.sh --nodes 1,2 start-cluster 2 qwen3.5-122b
+  ./vllm_cluster_orchestrator.sh --nodes 1,2 load-model qwen3.5-122b
 USAGE
   exit 1
 fi
