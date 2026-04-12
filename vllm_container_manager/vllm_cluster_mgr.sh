@@ -315,7 +315,7 @@ LoadModel() {
   
   # Ensure target port is free — kill any stale process holding it
   local port_pid
-  port_pid="$(ss -tlnp 2>/dev/null | grep ":${VLLM_PORT} " | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | head -1)"
+  port_pid="$(ss -tlnp 2>/dev/null | grep ":${VLLM_PORT} " | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | head -1 || true)"
   if [[ -n "${port_pid}" ]]; then
     Log "WARNING: Port ${VLLM_PORT} held by pid ${port_pid} — killing stale process"
     kill "${port_pid}" 2>/dev/null || true

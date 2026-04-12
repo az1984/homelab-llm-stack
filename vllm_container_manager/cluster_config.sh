@@ -223,7 +223,7 @@ declare -gA MODELS=(
   # TODO: build vllm-sm121-397b — see CLUSTER_README.md Step 2
   [qwen3.5-397b]="
     DOCKER_IMAGE=vllm-sm121
-    MODEL_DIR= /opt/ai-models/hf/cyankiwi/Qwen3.5-397B-A17B-AWQ-4bit
+    MODEL_DIR=/opt/ai-models/hf/cyankiwi/Qwen3.5-397B-A17B-AWQ-4bit
     SERVED_MODEL_NAME=chat-heavy,chat-heavy-qwen,qwen35-397b-a17b
     AUTO_AWQ_MARLIN=0
     TENSOR_PARALLEL_SIZE=4
