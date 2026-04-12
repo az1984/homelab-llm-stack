@@ -222,7 +222,7 @@ declare -gA MODELS=(
   # Requires vllm-sm121-397b (sm121 base + Marlin TP=4 fix + AutoRound ROPE fix)
   # TODO: build vllm-sm121-397b — see CLUSTER_README.md Step 2
   [qwen3.5-397b]="
-    DOCKER_IMAGE=vllm-sm121-397b
+    DOCKER_IMAGE=vllm-sm121
     MODEL_DIR= /opt/ai-models/hf/cyankiwi/Qwen3.5-397B-A17B-AWQ-4bit
     SERVED_MODEL_NAME=chat-heavy,chat-heavy-qwen,qwen35-397b-a17b
     AUTO_AWQ_MARLIN=0
@@ -233,7 +233,7 @@ declare -gA MODELS=(
     GPU_MEMORY_UTILIZATION=0.80
     ENABLE_PREFIX_CACHING=1
     ENABLE_CHUNKED_PREFILL=1
-    KV_CACHE_DTYPE=fp8
+    KV_CACHE_DTYPE=auto
     TRUST_REMOTE_CODE=1
     ENABLE_AUTO_TOOL_CHOICE=1
     TOOL_CALL_PARSER=hermes

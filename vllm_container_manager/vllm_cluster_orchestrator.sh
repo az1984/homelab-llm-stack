@@ -255,6 +255,74 @@ cmd_load_model() {
   
   Log "Loading model on head node ${head_node}..."
   ssh admin@${node_ip} "sudo docker exec ${env_args} vllm-node-${head_node} /opt/vllm_cluster.sh load-model"
+  
+  # Post-launch verification: poll for signs of life
+  local vllm_port=$(echo "$model_config" | grep VLLM_PORT | cut -d'=' -f2 | xargs)
+  vllm_port="${vllm_port:-8000}"
+  local served_name=$(echo "$model_config" | grep SERVED_MODEL_NAME | cut -d'=' -f2 | xargs)
+  
+  Log "Waiting for vLLM to initialize..."
+  local max_wait=300  # 5 minutes max
+  local elapsed=0
+  local stage="starting"
+  
+  while [[ $elapsed -lt $max_wait ]]; do
+    sleep 10
+    elapsed=$((elapsed + 10))
+    
+    # Check if process is still alive
+    local proc_check
+    proc_check=$(ssh admin@${node_ip} "sudo docker exec vllm-node-${head_node} cat /opt/ai-tools/run/vllm-cluster/vllm_api.pid 2>/dev/null" || true)
+    if [[ -z "$proc_check" ]]; then
+      Log "  [${elapsed}s] WARNING: No PID file found — load-model may have failed"
+      Log "  Check: ssh admin@${node_ip} 'tail -30 /opt/ai-tools/logs/vllm-cluster/vllm_*_latest.log'"
+      return 1
+    fi
+    
+    # Check for fatal errors in log
+    local errors
+    errors=$(ssh admin@${node_ip} "sudo docker exec vllm-node-${head_node} grep -c 'EngineCore failed\|RuntimeError\|FATAL' /opt/ai-tools/logs/vllm-cluster/vllm_*_latest.log 2>/dev/null" || echo "0")
+    if [[ "$errors" -gt 0 ]]; then
+      Log "  [${elapsed}s] FAILED: Errors detected in log"
+      Log "  Check: ssh admin@${node_ip} 'grep -A5 \"Error\\|RuntimeError\" /opt/ai-tools/logs/vllm-cluster/vllm_*_latest.log | tail -20'"
+      return 1
+    fi
+    
+    # Try health endpoint
+    local health
+    health=$(curl -sf --connect-timeout 2 --max-time 5 "http://${node_ip}:${vllm_port}/health" 2>/dev/null || true)
+    if [[ -n "$health" ]]; then
+      Log "  [${elapsed}s] READY — vLLM responding on port ${vllm_port}"
+      
+      # Show model name
+      local models
+      models=$(curl -sf "http://${node_ip}:${vllm_port}/v1/models" 2>/dev/null | python3 -c "import sys,json; [print(m['id']) for m in json.load(sys.stdin).get('data',[])]" 2>/dev/null || true)
+      if [[ -n "$models" ]]; then
+        Log "  Serving: ${models}"
+      fi
+      return 0
+    fi
+    
+    # Detect stage from log
+    local log_tail
+    log_tail=$(ssh admin@${node_ip} "sudo docker exec vllm-node-${head_node} tail -3 /opt/ai-tools/logs/vllm-cluster/vllm_*_latest.log 2>/dev/null" || true)
+    
+    if echo "$log_tail" | grep -q "Loading safetensors"; then
+      stage="loading weights"
+    elif echo "$log_tail" | grep -q "torch.compile\|compile"; then
+      stage="compiling"
+    elif echo "$log_tail" | grep -q "CUDA graph\|Graph capturing"; then
+      stage="capturing CUDA graphs"
+    elif echo "$log_tail" | grep -q "Starting vLLM\|Application startup"; then
+      stage="starting API server"
+    fi
+    
+    Log "  [${elapsed}s] ${stage}..."
+  done
+  
+  Log "  [${elapsed}s] TIMEOUT — vLLM did not become ready in ${max_wait}s"
+  Log "  Check: ssh admin@${node_ip} 'tail -50 /opt/ai-tools/logs/vllm-cluster/vllm_*_latest.log'"
+  return 1
 }
 
 cmd_stop_model() {

@@ -313,6 +313,23 @@ LoadModel() {
     Die "vLLM already running (pid=${old_pid}). Stop it first with: stop-model"
   fi
   
+  # Ensure target port is free — kill any stale process holding it
+  local port_pid
+  port_pid="$(ss -tlnp 2>/dev/null | grep ":${VLLM_PORT} " | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | head -1)"
+  if [[ -n "${port_pid}" ]]; then
+    Log "WARNING: Port ${VLLM_PORT} held by pid ${port_pid} — killing stale process"
+    kill "${port_pid}" 2>/dev/null || true
+    sleep 2
+    if ss -tlnp 2>/dev/null | grep -q ":${VLLM_PORT} "; then
+      kill -9 "${port_pid}" 2>/dev/null || true
+      sleep 1
+    fi
+    if ss -tlnp 2>/dev/null | grep -q ":${VLLM_PORT} "; then
+      Die "Cannot free port ${VLLM_PORT} — something is still holding it"
+    fi
+    Log "  Port ${VLLM_PORT} freed"
+  fi
+  
   # Rotate log: timestamped file + _latest symlink
   local timestamp
   timestamp="$(date +%Y%m%d_%H%M%S)"
