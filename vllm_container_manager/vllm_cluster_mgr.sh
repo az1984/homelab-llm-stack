@@ -70,6 +70,7 @@ TRUST_REMOTE_CODE="${TRUST_REMOTE_CODE:-1}"
 # ==============================================================================
 ENABLE_AUTO_TOOL_CHOICE="${ENABLE_AUTO_TOOL_CHOICE:-0}"
 TOOL_CALL_PARSER="${TOOL_CALL_PARSER:-}"
+REASONING_PARSER="${REASONING_PARSER:-}"
 
 # ==============================================================================
 # Performance Optimizations
@@ -281,6 +282,7 @@ BuildVLLMArgs() {
   [[ "${KV_CACHE_DTYPE}" != "auto" ]] && args+=(--kv-cache-dtype "${KV_CACHE_DTYPE}")
   [[ "${ENABLE_AUTO_TOOL_CHOICE}" == "1" ]] && args+=(--enable-auto-tool-choice)
   [[ -n "${TOOL_CALL_PARSER}" ]] && args+=(--tool-call-parser "${TOOL_CALL_PARSER}")
+  [[ -n "${REASONING_PARSER}" ]] && args+=(--reasoning-parser "${REASONING_PARSER}")
   
   # Auto AWQ detection
   if [[ -z "${QUANTIZATION}" ]] && [[ "${AUTO_AWQ_MARLIN}" == "1" ]]; then
