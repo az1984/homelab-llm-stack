@@ -266,6 +266,38 @@ declare -gA MODELS=(
     RAY_OBJECT_STORE_GB=1
     ENFORCE_EAGER=0
   "
+
+  # =========================================================================
+  # GLM-4.7 (standard MoE — no GDN/Mamba, no MLA)
+  # =========================================================================
+
+  # GLM-4.7-355B: TP=4, compressed-tensors AWQ (same kernel path as 122B)
+  # EQBench creative: 66.0 (vs 397B=68.3, 122B=54.3)
+  # ~177GB model, ~44GB/node at TP=4, massive KV headroom at 0.80
+  # Uses vllm-sm121 image (recent eugr build, already has GLM-4.7 support)
+  # If arch error: rebuild with --pre-tf for transformers 5.x
+  # Tool calling: --tool-call-parser glm47 --reasoning-parser glm45
+  [glm-4.7]="
+    DOCKER_IMAGE=vllm-sm121
+    MODEL_DIR=/opt/ai-models/hf/cyankiwi/GLM-4.7-AWQ-4bit
+    SERVED_MODEL_NAME=chat-heavy,chat-heavy-glm,glm-4.7
+    AUTO_AWQ_MARLIN=0
+    TENSOR_PARALLEL_SIZE=4
+    MAX_MODEL_LEN=131072
+    MAX_NUM_SEQS=4
+    MAX_NUM_BATCHED_TOKENS=8192
+    GPU_MEMORY_UTILIZATION=0.80
+    ENABLE_PREFIX_CACHING=1
+    ENABLE_CHUNKED_PREFILL=1
+    KV_CACHE_DTYPE=auto
+    TRUST_REMOTE_CODE=1
+    ENABLE_AUTO_TOOL_CHOICE=1
+    TOOL_CALL_PARSER=glm47
+    REASONING_PARSER=glm45
+    VLLM_PORT=8000
+    RAY_OBJECT_STORE_GB=2
+    ENFORCE_EAGER=0
+  "
 )
 
 # Default image if model profile doesn't specify DOCKER_IMAGE
