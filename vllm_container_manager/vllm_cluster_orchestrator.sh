@@ -120,6 +120,7 @@ ensure_container() {
     -e NCCL_DEBUG=INFO \
     ${profile_env_args} \
     -v /opt/ai-models:/opt/ai-models:ro \
+    -v /mnt/network/ai-models:/mnt/network/ai-models:ro \
     -v /opt/ai-tools/logs:/opt/ai-tools/logs \
     -v /opt/ai-tools/run:/opt/ai-tools/run \
     -v /opt/ai-tools/cache/triton:/root/.triton/cache \
@@ -470,7 +471,8 @@ Profiles:
                          --nodes 1 start-cluster 1 qwen3.5-122b-v2
                          --nodes 2 start-cluster 1 qwen3.5-122b-v2
   qwen3.5-122b      - Fallback: eugr image, TP=2, cyankiwi model, 22 tok/s
-  qwen3.5-397b      - Heavy mode: TP=4, all nodes, ~37 tok/s (needs vllm-sm121-397b)
+  qwen3.5-397b      - Heavy mode: TP=4, all nodes, ~37 tok/s (NAS, needs vllm-sm121-397b)
+  minimax-m2.7      - 229B MoE: TP=4, all nodes, NAS-resident (vllm-sm121)
   qwen3.5-9b        - Vision: TP=1, port 8002, cohabits with other services
 
 Examples:
@@ -480,9 +482,13 @@ Examples:
   ./vllm_cluster_orchestrator.sh --nodes 2 start-cluster 1 qwen3.5-122b-v2
   ./vllm_cluster_orchestrator.sh --nodes 2 load-model qwen3.5-122b-v2
 
-  # 397B heavy mode (all nodes)
+  # 397B heavy mode (all nodes, NAS)
   ./vllm_cluster_orchestrator.sh --nodes 1,2,3,4 start-cluster 4 qwen3.5-397b
   ./vllm_cluster_orchestrator.sh --nodes 1,2,3,4 load-model qwen3.5-397b
+
+  # MiniMax-M2.7 (all nodes, NAS)
+  ./vllm_cluster_orchestrator.sh --nodes 1,2,3,4 start-cluster 4 minimax-m2.7
+  ./vllm_cluster_orchestrator.sh --nodes 1,2,3,4 load-model minimax-m2.7
 
   # Fallback 122B on TP=2
   ./vllm_cluster_orchestrator.sh --nodes 1,2 start-cluster 2 qwen3.5-122b

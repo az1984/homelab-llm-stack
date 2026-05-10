@@ -225,7 +225,7 @@ declare -gA MODELS=(
   # TODO: build vllm-sm121-397b — see CLUSTER_README.md Step 2
   [qwen3.5-397b]="
     DOCKER_IMAGE=vllm-sm121
-    MODEL_DIR=/opt/ai-models/hf/cyankiwi/Qwen3.5-397B-A17B-AWQ-4bit
+    MODEL_DIR=/mnt/network/ai-models/huggingface/hf/cyankiwi/Qwen3.5-397B-A17B-AWQ-4bit
     SERVED_MODEL_NAME=chat-heavy,chat-heavy-qwen,qwen35-397b-a17b
     AUTO_AWQ_MARLIN=0
     TENSOR_PARALLEL_SIZE=4
@@ -236,6 +236,7 @@ declare -gA MODELS=(
     ENABLE_PREFIX_CACHING=1
     ENABLE_CHUNKED_PREFILL=1
     KV_CACHE_DTYPE=auto
+    LOAD_FORMAT=safetensors
     TRUST_REMOTE_CODE=1
     ENABLE_AUTO_TOOL_CHOICE=1
     TOOL_CALL_PARSER=hermes
@@ -298,6 +299,40 @@ declare -gA MODELS=(
     RAY_OBJECT_STORE_GB=2
     ENFORCE_EAGER=0
   "
+  # =========================================================================
+  # MiniMax (standard MoE — compressed-tensors quant format)
+  # =========================================================================
+
+  # MiniMax-M2.7: 229B total / 10B active MoE, TP=4
+  # compressed-tensors pack-quantized INT4 (group_size=32) — do NOT set QUANTIZATION flag
+  # use_mtp=true, num_mtp_modules=3 — MTP available if image supports it
+  # NAS-resident: LOAD_FORMAT=safetensors prevents lazy mmap over SMB
+  # COMPILATION_CONFIG: fuse_minimax_qk_norm requires nightly build ~0.19.x+
+  #   If launch fails with unknown compilation pass, remove COMPILATION_CONFIG and retry
+  [minimax-m2.7]="
+    DOCKER_IMAGE=vllm-sm121
+    MODEL_DIR=/mnt/network/ai-models/huggingface/hf/cyankiwi/MiniMax-M2.7-AWQ-4bit
+    SERVED_MODEL_NAME=chat-heavy,chat-heavy-minimax,minimax-m2.7-229b-a10b
+    AUTO_AWQ_MARLIN=0
+    TENSOR_PARALLEL_SIZE=4
+    MAX_MODEL_LEN=131072
+    MAX_NUM_SEQS=4
+    MAX_NUM_BATCHED_TOKENS=8192
+    GPU_MEMORY_UTILIZATION=0.80
+    ENABLE_PREFIX_CACHING=1
+    ENABLE_CHUNKED_PREFILL=1
+    KV_CACHE_DTYPE=auto
+    LOAD_FORMAT=safetensors
+    TRUST_REMOTE_CODE=1
+    ENABLE_AUTO_TOOL_CHOICE=1
+    TOOL_CALL_PARSER=minimax_m2
+    REASONING_PARSER=minimax_m2
+    COMPILATION_CONFIG={"mode":3,"pass_config":{"fuse_minimax_qk_norm":true}}
+    VLLM_PORT=8000
+    RAY_OBJECT_STORE_GB=2
+    ENFORCE_EAGER=0
+  "
+
 )
 
 # Default image if model profile doesn't specify DOCKER_IMAGE
