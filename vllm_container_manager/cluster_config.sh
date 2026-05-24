@@ -245,6 +245,108 @@ declare -gA MODELS=(
     ENFORCE_EAGER=0
   "
 
+  # -------------------------------------------------------------------------
+  # PATH A — Qwen3.5-397B Intel int4-AutoRound, TP=2, VISION ON
+  #          Tuned for ONE full-context stream (chat-ultra-heavy single seat)
+  # -------------------------------------------------------------------------
+  # Goal: 1 stream at max context on 2 nodes (magnesium+aluminium), leaving
+  # silicon+phosphorus free for Qwen3.5-122B / speech / ComfyUI / SGLang.
+  # Beats GLM-4.7 (which eats all 4 nodes) on speed AND adds vision.
+  #
+  # The !!!! fix: the hand-run vllm-node-tf5 had --language-model-only, which
+  # breaks weight-prefix mapping on the early-fusion VLM. This orchestrator
+  # never adds that flag, so the full fused model (vision included) loads by
+  # default — the fix is free here.
+  #
+  # IMAGE: vllm-sm121-397b carries the AutoRound ROPE fix (per CUSTOM_IMAGES
+  # notes). NOT vllm-qwen35-v2 — that one has hybrid-INT4+FP8 patches, no
+  # AutoRound layer (verified via docker history).
+  #
+  # MEMORY CLIFF: at TP=2, ~100GB weights/node leaves ~10-15GB/node for KV.
+  # Single stream (MAX_NUM_SEQS=1) + fp8 KV. EMPIRICAL (2026-05-23): at
+  # GPU_MEM_UTIL=0.85, vLLM reported max usable context = 221328 (262144
+  # needs 2.06 GiB KV, only 1.79 GiB free). Set to 200000 for safe headroom
+  # below that ceiling. To push higher: bump GPU_MEM_UTIL toward 0.88 (Ray
+  # OOMs ~0.95 on unified memory — do not exceed). Weights on data/models
+  # SSD share (NFS/100G); orchestrator binds it :ro.
+  #
+  # Deploy: ./vllm_cluster_orchestrator.sh --nodes 2 start-cluster 1 qwen3.5-397b-autoround
+  [qwen3.5-397b-autoround]="
+    DOCKER_IMAGE=vllm-sm121-397b
+    MODEL_DIR=/mnt/network/data/models/huggingface/hf/Intel/Qwen3.5-397B-A17B-int4-AutoRound
+    SERVED_MODEL_NAME=chat-ultra-heavy,chat-heavy-qwen,qwen35-397b-a17b
+    AUTO_AWQ_MARLIN=0
+    TENSOR_PARALLEL_SIZE=2
+    MAX_MODEL_LEN=200000
+    MAX_NUM_SEQS=1
+    MAX_NUM_BATCHED_TOKENS=8192
+    GPU_MEMORY_UTILIZATION=0.85
+    ENABLE_PREFIX_CACHING=1
+    ENABLE_CHUNKED_PREFILL=1
+    KV_CACHE_DTYPE=fp8
+    TRUST_REMOTE_CODE=1
+    ENABLE_AUTO_TOOL_CHOICE=1
+    TOOL_CALL_PARSER=qwen3_coder
+    REASONING_PARSER=qwen3
+    VLLM_PORT=8000
+    RAY_OBJECT_STORE_GB=2
+    ENFORCE_EAGER=1
+  "
+
+  # NOTE: PATH B is the existing [qwen3.5-397b] profile above (AWQ, TP=4).
+  # It still needs the vllm-sm121-397b image built (Marlin TP=4 + AutoRound
+  # ROPE fix) per its TODO, OR a test run on base vllm-sm121. Path A (TP=2,
+  # AutoRound) is the lower-effort first attempt; Path B (TP=4, AWQ) is the
+  # fallback/scale path if AutoRound proves unworkable.
+
+  # -------------------------------------------------------------------------
+  # PATH A-tp4 — Qwen3.5-397B AutoRound, TP=4, CONCURRENCY + COHABITATION
+  # -------------------------------------------------------------------------
+  # Same model/image/quant as [qwen3.5-397b-autoround], but spread across ALL
+  # FOUR nodes. Purpose: real multi-stream concurrency (OpenWebUI + Cline +
+  # NovelCrafter at once) AND room on each node for a resting secondary tenant.
+  #
+  # WHY TP=4 over TP=2: (1) different collective topology — may sidestep the
+  # TP=2 post-load KV-init hang (2026-05-23: TP=2 loaded 41/41 then froze at
+  # the rank rendezvous, GPUs idle). (2) ~50GB weights/node (vs ~100 at TP=2)
+  # → full 262144 context fits easily AND leaves headroom. (3) community
+  # working-397B results are mostly TP=4.
+  #
+  # MEMORY @ GPU_MEM_UTIL=0.80: vLLM claims ~102GB/node, leaves ~26GB/node for
+  # a resting tenant. RESTING TENANT MAP (bring up AFTER 397B is serving, so
+  # vLLM claims its 0.80 first):
+  #     magnesium  → Whisper (STT, ~3GB)
+  #     aluminium  → Fish2 (TTS, ~2-4GB)
+  #     silicon    → ComfyUI (image gen: SDXL / Flux-fp8 — LIGHT workflows only)
+  #     phosphorus → Qwen3.5-9B (Hermes-agent fast path, ~10-18GB w/ its KV)
+  # SPIKE ESCAPE VALVE: heavy ComfyUI (video gen, big Flux+LoRA stacks) needs
+  # more than 26GB → that's a deliberate hands-on session: tear down 397B,
+  # bring up 122B instead (lighter footprint), let freed nodes feed ComfyUI.
+  # Not an ambient mode — a conscious tier swap.
+  #
+  # Deploy: ./vllm_cluster_orchestrator.sh --nodes 1,2,3,4 start-cluster 4 qwen3.5-397b-autoround-tp4
+  [qwen3.5-397b-autoround-tp4]="
+    DOCKER_IMAGE=vllm-sm121-397b
+    MODEL_DIR=/mnt/network/data/models/huggingface/hf/Intel/Qwen3.5-397B-A17B-int4-AutoRound
+    SERVED_MODEL_NAME=chat-ultra-heavy,chat-heavy-qwen,qwen35-397b-a17b
+    AUTO_AWQ_MARLIN=0
+    TENSOR_PARALLEL_SIZE=4
+    MAX_MODEL_LEN=262144
+    MAX_NUM_SEQS=4
+    MAX_NUM_BATCHED_TOKENS=8192
+    GPU_MEMORY_UTILIZATION=0.80
+    ENABLE_PREFIX_CACHING=1
+    ENABLE_CHUNKED_PREFILL=1
+    KV_CACHE_DTYPE=fp8
+    TRUST_REMOTE_CODE=1
+    ENABLE_AUTO_TOOL_CHOICE=1
+    TOOL_CALL_PARSER=qwen3_coder
+    REASONING_PARSER=qwen3
+    VLLM_PORT=8000
+    RAY_OBJECT_STORE_GB=2
+    ENFORCE_EAGER=1
+  "
+
   # Qwen3.5-9B: Vision (chat-peeks), single node, cohabits with TTS/STT/ComfyUI
   # ~5GB model at 0.30 util = ~38GB to vLLM, leaves ~90GB for cohabitants
   [qwen3.5-9b]="

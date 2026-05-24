@@ -121,6 +121,7 @@ ensure_container() {
     ${profile_env_args} \
     -v /opt/ai-models:/opt/ai-models:ro \
     -v /mnt/network/ai-models:/mnt/network/ai-models:ro \
+    -v /mnt/network/data/models:/mnt/network/data/models:ro \
     -v /opt/ai-tools/logs:/opt/ai-tools/logs \
     -v /opt/ai-tools/run:/opt/ai-tools/run \
     -v /opt/ai-tools/cache/triton:/root/.triton/cache \
