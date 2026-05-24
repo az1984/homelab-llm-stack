@@ -173,14 +173,14 @@ declare -gA MODELS=(
   # Perf: 29-44 tok/s single-stream (MTP-2, 95-100% acceptance rate)
   # Deploy: ./vllm_cluster_orchestrator.sh --nodes 1 start-cluster 1 qwen3.5-122b-v2
   #         ./vllm_cluster_orchestrator.sh --nodes 2 start-cluster 1 qwen3.5-122b-v2
-  [qwen3.5-122b-v2]="
+  [qwen3.5-122b-tp1]="
     DOCKER_IMAGE=vllm-qwen35-v2
     MODEL_DIR=/opt/ai-models/local/qwen35-122b-hybrid-int4fp8
     SERVED_MODEL_NAME=chat-heavy,chat-heavy-qwen,qwen35-122b-a10b
     AUTO_AWQ_MARLIN=0
     TENSOR_PARALLEL_SIZE=1
-    MAX_MODEL_LEN=250000
-    MAX_NUM_SEQS=4
+    MAX_MODEL_LEN=240000
+    MAX_NUM_SEQS=6
     MAX_NUM_BATCHED_TOKENS=8192
     GPU_MEMORY_UTILIZATION=0.80
     ENABLE_PREFIX_CACHING=1

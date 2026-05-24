@@ -59,10 +59,11 @@ ensure_container() {
     if [[ -n "${model_config}" ]]; then
       served_name=$(echo "$model_config" | grep "SERVED_MODEL_NAME=" | cut -d'=' -f2 | xargs)
       # Bake all profile env vars into the container
+      # Values are quoted to handle spaces (e.g. VLLM_EXTRA_ARGS=--foo bar)
       while IFS='=' read -r key value; do
         key=$(echo "$key" | xargs)
         value=$(echo "$value" | xargs)
-        [[ -n "$key" && -n "$value" ]] && profile_env_args="${profile_env_args} -e ${key}=${value}"
+        [[ -n "$key" && -n "$value" ]] && profile_env_args="${profile_env_args} -e ${key}=\"${value}\""
       done <<< "${model_config}"
     fi
   fi
@@ -133,9 +134,54 @@ ensure_container() {
   Log "  Container started"
 }
 
+get_profile_tp_size() {
+  local profile=$1
+  local model_config="${MODELS[$profile]:-}"
+  if [[ -n "${model_config}" ]]; then
+    echo "$model_config" | grep "TENSOR_PARALLEL_SIZE=" | cut -d'=' -f2 | xargs
+  fi
+}
+
 cmd_start_cluster() {
-  local num_nodes=${1:-2}
-  local profile=${2:-}
+  local arg1=${1:-}
+  local arg2=${2:-}
+  local num_nodes=""
+  local profile=""
+
+  # Parse args: start-cluster PROFILE | start-cluster N | start-cluster N PROFILE
+  if [[ -n "$arg1" ]]; then
+    if [[ "$arg1" =~ ^[0-9]+$ ]]; then
+      # First arg is a number — explicit node count
+      num_nodes="$arg1"
+      profile="${arg2:-}"
+    else
+      # First arg is a profile name — infer node count from TP size
+      profile="$arg1"
+      if [[ -n "$arg2" ]]; then
+        Log "WARNING: extra argument '$arg2' ignored (node count inferred from profile TP size)"
+      fi
+    fi
+  fi
+
+  # If we have a profile, validate it exists
+  if [[ -n "$profile" ]]; then
+    local model_config="${MODELS[$profile]:-}"
+    if [[ -z "${model_config}" ]]; then
+      Log "ERROR: Unknown profile '${profile}'"
+      exit 1
+    fi
+  fi
+
+  # Infer node count from profile TP size if not explicitly given
+  if [[ -z "$num_nodes" ]]; then
+    if [[ -n "$profile" ]]; then
+      num_nodes=$(get_profile_tp_size "$profile")
+      Log "Inferred ${num_nodes}-node cluster from profile '${profile}' (TP=${num_nodes})"
+    else
+      num_nodes=2
+      Log "No profile or node count given, defaulting to ${num_nodes} nodes"
+    fi
+  fi
   
   Log "=== Starting ${num_nodes}-node cluster ==="
   
@@ -437,7 +483,7 @@ while [[ $# -gt 0 ]]; do
       parse_node_filter "$2"
       shift 2
       ;;
-    start-cluster|load-model|stop-model|status|details|stop-cluster)
+    start-cluster|load-model|unload-model|stop-model|status|details|stop-cluster)
       COMMAND="$1"
       shift
       ARGS=("$@")
@@ -455,9 +501,11 @@ if [[ -z "$COMMAND" ]]; then
 Usage: ./vllm_cluster_orchestrator.sh [--nodes N,M,...] <command> [args]
 
 Commands:
-  start-cluster N [PROFILE]  - Start N-node cluster (optionally pre-configure for PROFILE)
+  start-cluster PROFILE      - Start cluster; infer node count from profile TP size
+  start-cluster N            - Start N bare containers (no profile)
+  start-cluster N PROFILE    - Start N-node cluster (explicit override)
   load-model PROFILE         - Load model from cluster_config.sh
-  stop-model                 - Stop vLLM (keep Ray + containers)
+  unload-model               - Unload model (keep Ray + containers)
   status                     - Show cluster container status + Ray info
   details                    - Probe API endpoints, show served model names per node/port
   stop-cluster               - Stop all containers
@@ -467,41 +515,40 @@ Node Filtering:
   --nodes 3          - Single node deployment
 
 Profiles:
-  qwen3.5-122b-v2   - PRODUCTION: Albond hybrid + MTP-2, TP=1, 29-44 tok/s
-                       Deploy as independent pair behind HAProxy:
-                         --nodes 1 start-cluster 1 qwen3.5-122b-v2
-                         --nodes 2 start-cluster 1 qwen3.5-122b-v2
-  qwen3.5-122b      - Fallback: eugr image, TP=2, cyankiwi model, 22 tok/s
-  qwen3.5-397b      - Heavy mode: TP=4, all nodes, ~37 tok/s (NAS, needs vllm-sm121-397b)
-  minimax-m2.7      - 229B MoE: TP=4, all nodes, NAS-resident (vllm-sm121)
-  qwen3.5-9b        - Vision: TP=1, port 8002, cohabits with other services
+  qwen3.5-122b-v2            - PRODUCTION: Albond hybrid + MTP-2, TP=1, 29-44 tok/s
+  qwen3.5-122b               - Fallback: eugr image, TP=2, cyankiwi model, 22 tok/s
+  qwen3.5-397b-autoround     - Heavy: TP=2, AutoRound, NAS (vllm-sm121-397b)
+  qwen3.5-397b-autoround-tp4 - Heavy: TP=4, AutoRound, NAS (vllm-sm121-397b)
+  minimax-m2.7               - 229B MoE: TP=4, NAS (vllm-sm121)
+  minimax-m2.7-tp2           - 229B MoE: TP=2, NAS (vllm-sm121), 32-35 tok/s
+  glm-4.7                    - 355B MoE: TP=4, local SSD (vllm-sm121)
+  qwen3.5-9b                 - Vision: TP=1, port 8002, cohabits
 
 Examples:
+  # MiniMax on 2 nodes (TP inferred from profile)
+  ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster minimax-m2.7-tp2
+  ./vllm_cluster_orchestrator.sh --nodes 3,4 load-model minimax-m2.7-tp2
+
   # Production 122B: two independent TP=1 nodes behind HAProxy
-  ./vllm_cluster_orchestrator.sh --nodes 1 start-cluster 1 qwen3.5-122b-v2
+  ./vllm_cluster_orchestrator.sh --nodes 1 start-cluster qwen3.5-122b-v2
   ./vllm_cluster_orchestrator.sh --nodes 1 load-model qwen3.5-122b-v2
-  ./vllm_cluster_orchestrator.sh --nodes 2 start-cluster 1 qwen3.5-122b-v2
+  ./vllm_cluster_orchestrator.sh --nodes 2 start-cluster qwen3.5-122b-v2
   ./vllm_cluster_orchestrator.sh --nodes 2 load-model qwen3.5-122b-v2
 
-  # 397B heavy mode (all nodes, NAS)
-  ./vllm_cluster_orchestrator.sh --nodes 1,2,3,4 start-cluster 4 qwen3.5-397b
-  ./vllm_cluster_orchestrator.sh --nodes 1,2,3,4 load-model qwen3.5-397b
+  # GLM-4.7 (TP=4 inferred, all nodes)
+  ./vllm_cluster_orchestrator.sh --nodes 1,2,3,4 start-cluster glm-4.7
+  ./vllm_cluster_orchestrator.sh --nodes 1,2,3,4 load-model glm-4.7
 
-  # MiniMax-M2.7 (all nodes, NAS)
-  ./vllm_cluster_orchestrator.sh --nodes 1,2,3,4 start-cluster 4 minimax-m2.7
-  ./vllm_cluster_orchestrator.sh --nodes 1,2,3,4 load-model minimax-m2.7
-
-  # Fallback 122B on TP=2
-  ./vllm_cluster_orchestrator.sh --nodes 1,2 start-cluster 2 qwen3.5-122b
-  ./vllm_cluster_orchestrator.sh --nodes 1,2 load-model qwen3.5-122b
+  # Unload model, keep containers
+  ./vllm_cluster_orchestrator.sh --nodes 3,4 unload-model
 USAGE
   exit 1
 fi
 
 case "$COMMAND" in
-  start-cluster) cmd_start_cluster "${ARGS[0]:-2}" "${ARGS[1]:-}" ;;
+  start-cluster) cmd_start_cluster "${ARGS[0]:-}" "${ARGS[1]:-}" ;;
   load-model) cmd_load_model "${ARGS[0]}" ;;
-  stop-model) cmd_stop_model ;;
+  unload-model|stop-model) cmd_stop_model ;;
   status) cmd_status ;;
   details) cmd_details ;;
   stop-cluster) cmd_stop_cluster ;;
