@@ -302,7 +302,10 @@ BuildVLLMArgs() {
   fi
 
   # Standalone speculative token override (e.g. NUM_SPECULATIVE_TOKENS=0 to disable MTP auto-detection)
-  [[ -n "${NUM_SPECULATIVE_TOKENS}" ]] && args+=(--num-speculative-tokens "${NUM_SPECULATIVE_TOKENS}")
+  # Uses --speculative-config JSON — --num-speculative-tokens does not exist in 0.19.x
+  if [[ -n "${NUM_SPECULATIVE_TOKENS}" ]] && [[ -z "${SPECULATIVE_METHOD}" ]]; then
+    args+=(--speculative-config "{\"num_speculative_tokens\":${NUM_SPECULATIVE_TOKENS}}")
+  fi
 
   if [[ -n "${VLLM_EXTRA_ARGS}" ]]; then
     # shellcheck disable=SC2206

@@ -442,8 +442,9 @@ declare -gA MODELS=(
 
   # MiniMax-M2.7: TP=2 variant for 2-node deployment
   # ~57GB weights/node at INT4, ~45GB KV headroom at 0.80
-  # Phase 1: ENFORCE_EAGER=1, 131k context, smoke test
-  # Phase 2: ENFORCE_EAGER=0 (CUDA graphs), bump MAX_MODEL_LEN
+  # Phase 1 PASSED: eager mode, 131k, 32-35 tok/s generation (2026-05-24)
+  # Phase 2: CUDA graphs enabled, 131k (bump to 200k/seqs=1 after graphs confirmed)
+  # MTP disabled in model config.json (use_mtp: false) — re-enable on vLLM v0.21+
   # Deploy: ./vllm_cluster_orchestrator.sh --nodes X,Y start-cluster 2 minimax-m2.7-tp2
   [minimax-m2.7-tp2]="
     DOCKER_IMAGE=vllm-sm121
@@ -465,8 +466,7 @@ declare -gA MODELS=(
     REASONING_PARSER=minimax_m2
     VLLM_PORT=8000
     RAY_OBJECT_STORE_GB=2
-    ENFORCE_EAGER=1
-    NUM_SPECULATIVE_TOKENS=0
+    ENFORCE_EAGER=0
   "
 
 )

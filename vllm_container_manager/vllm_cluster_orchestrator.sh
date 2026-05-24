@@ -264,7 +264,7 @@ cmd_load_model() {
   local served_name=$(echo "$model_config" | grep SERVED_MODEL_NAME | cut -d'=' -f2 | xargs)
   
   Log "Waiting for vLLM to initialize..."
-  local max_wait=300  # 5 minutes max
+  local max_wait=900  # 15 minutes max (NFS weight loading + CUDA graph compilation)
   local elapsed=0
   local stage="starting"
   
