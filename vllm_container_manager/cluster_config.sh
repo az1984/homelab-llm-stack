@@ -435,6 +435,34 @@ declare -gA MODELS=(
     ENFORCE_EAGER=0
   "
 
+  # MiniMax-M2.7: TP=2 variant for 2-node deployment
+  # ~57GB weights/node at INT4, ~45GB KV headroom at 0.80
+  # Phase 1: ENFORCE_EAGER=1, 131k context, smoke test
+  # Phase 2: ENFORCE_EAGER=0 (CUDA graphs), bump MAX_MODEL_LEN
+  # Deploy: ./vllm_cluster_orchestrator.sh --nodes X,Y start-cluster 2 minimax-m2.7-tp2
+  [minimax-m2.7-tp2]="
+    DOCKER_IMAGE=vllm-sm121
+    MODEL_DIR=/mnt/network/ai-models/huggingface/hf/cyankiwi/MiniMax-M2.7-AWQ-4bit
+    SERVED_MODEL_NAME=chat-heavy,chat-heavy-minimax,minimax-m2.7-229b-a10b
+    AUTO_AWQ_MARLIN=0
+    TENSOR_PARALLEL_SIZE=2
+    MAX_MODEL_LEN=131072
+    MAX_NUM_SEQS=4
+    MAX_NUM_BATCHED_TOKENS=8192
+    GPU_MEMORY_UTILIZATION=0.80
+    ENABLE_PREFIX_CACHING=1
+    ENABLE_CHUNKED_PREFILL=1
+    KV_CACHE_DTYPE=auto
+    LOAD_FORMAT=safetensors
+    TRUST_REMOTE_CODE=1
+    ENABLE_AUTO_TOOL_CHOICE=1
+    TOOL_CALL_PARSER=minimax_m2
+    REASONING_PARSER=minimax_m2
+    VLLM_PORT=8000
+    RAY_OBJECT_STORE_GB=2
+    ENFORCE_EAGER=1
+  "
+
 )
 
 # Default image if model profile doesn't specify DOCKER_IMAGE
