@@ -283,7 +283,7 @@ cmd_load_model() {
     
     # Check for fatal errors in log
     local errors
-    errors=$(ssh admin@${node_ip} "sudo docker exec vllm-node-${head_node} grep -c 'EngineCore failed\|RuntimeError\|FATAL' /opt/ai-tools/logs/vllm-cluster/vllm_*_latest.log 2>/dev/null" || echo "0")
+    errors=$(ssh admin@${node_ip} "sudo docker exec vllm-node-${head_node} grep -c 'EngineCore failed\|RuntimeError\|FATAL' /opt/ai-tools/logs/vllm-cluster/vllm_*_latest.log 2>/dev/null | awk -F: '{s+=\$NF} END{print s+0}'" || echo "0")
     if [[ "$errors" -gt 0 ]]; then
       Log "  [${elapsed}s] FAILED: Errors detected in log"
       Log "  Check: ssh admin@${node_ip} 'grep -A5 \"Error\\|RuntimeError\" /opt/ai-tools/logs/vllm-cluster/vllm_*_latest.log | tail -20'"

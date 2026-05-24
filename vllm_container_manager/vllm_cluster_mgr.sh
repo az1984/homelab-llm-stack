@@ -104,6 +104,7 @@ fi
 VLLM_EXTRA_ARGS="${VLLM_EXTRA_ARGS:-}"
 SPECULATIVE_METHOD="${SPECULATIVE_METHOD:-}"
 SPECULATIVE_NUM_TOKENS="${SPECULATIVE_NUM_TOKENS:-}"
+NUM_SPECULATIVE_TOKENS="${NUM_SPECULATIVE_TOKENS:-}"
 LOAD_FORMAT="${LOAD_FORMAT:-}"
 COMPILATION_CONFIG="${COMPILATION_CONFIG:-}"
 VLLM_LOGFILE="${VLLM_LOGFILE:-${LOG_DIR}/vllm_${SERVED_MODEL_NAME}_node${THIS_NODE}.log}"
@@ -299,6 +300,9 @@ BuildVLLMArgs() {
     local spec_json="{\"method\":\"${SPECULATIVE_METHOD}\",\"num_speculative_tokens\":${SPECULATIVE_NUM_TOKENS:-1}}"
     args+=(--speculative-config "${spec_json}")
   fi
+
+  # Standalone speculative token override (e.g. NUM_SPECULATIVE_TOKENS=0 to disable MTP auto-detection)
+  [[ -n "${NUM_SPECULATIVE_TOKENS}" ]] && args+=(--num-speculative-tokens "${NUM_SPECULATIVE_TOKENS}")
 
   if [[ -n "${VLLM_EXTRA_ARGS}" ]]; then
     # shellcheck disable=SC2206
