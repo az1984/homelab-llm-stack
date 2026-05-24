@@ -10,6 +10,11 @@
 #   - MAX_NUM_BATCHED_TOKENS>=8192 required (Mamba block_size=4176)
 #   - GPU_MEMORY_UTILIZATION=0.80 recommended (unified memory + Ray OOM at 0.95)
 #   - RAY_memory_usage_threshold=0.98 set in orchestrator for all profiles
+#
+# MODEL_DIR path convention:
+#   Local SSD:  /opt/ai-models/hf/<vendor>/<model>
+#   NFS (NAS):  /mnt/network/data/models/huggingface/hf/<vendor>/<model>
+#   NEVER use:  /mnt/network/ai-models/...  (that's the SMB admin mount, not runtime)
 
 declare -gA NODES=(
   [1]="192.168.2.42:magnesium:10.10.10.1"
@@ -225,7 +230,7 @@ declare -gA MODELS=(
   # TODO: build vllm-sm121-397b — see CLUSTER_README.md Step 2
   [qwen3.5-397b]="
     DOCKER_IMAGE=vllm-sm121
-    MODEL_DIR=/mnt/network/ai-models/huggingface/hf/cyankiwi/Qwen3.5-397B-A17B-AWQ-4bit
+    MODEL_DIR=/mnt/network/data/models/huggingface/hf/cyankiwi/Qwen3.5-397B-A17B-AWQ-4bit
     SERVED_MODEL_NAME=chat-heavy,chat-heavy-qwen,qwen35-397b-a17b
     AUTO_AWQ_MARLIN=0
     TENSOR_PARALLEL_SIZE=4
@@ -413,7 +418,7 @@ declare -gA MODELS=(
   #   If launch fails with unknown compilation pass, remove COMPILATION_CONFIG and retry
   [minimax-m2.7]="
     DOCKER_IMAGE=vllm-sm121
-    MODEL_DIR=/mnt/network/ai-models/huggingface/hf/cyankiwi/MiniMax-M2.7-AWQ-4bit
+    MODEL_DIR=/mnt/network/data/models/huggingface/hf/cyankiwi/MiniMax-M2.7-AWQ-4bit
     SERVED_MODEL_NAME=chat-heavy,chat-heavy-minimax,minimax-m2.7-229b-a10b
     AUTO_AWQ_MARLIN=0
     TENSOR_PARALLEL_SIZE=4
@@ -442,7 +447,7 @@ declare -gA MODELS=(
   # Deploy: ./vllm_cluster_orchestrator.sh --nodes X,Y start-cluster 2 minimax-m2.7-tp2
   [minimax-m2.7-tp2]="
     DOCKER_IMAGE=vllm-sm121
-    MODEL_DIR=/mnt/network/ai-models/huggingface/hf/cyankiwi/MiniMax-M2.7-AWQ-4bit
+    MODEL_DIR=/mnt/network/data/models/huggingface/hf/cyankiwi/MiniMax-M2.7-AWQ-4bit
     SERVED_MODEL_NAME=chat-heavy,chat-heavy-minimax,minimax-m2.7-229b-a10b
     AUTO_AWQ_MARLIN=0
     TENSOR_PARALLEL_SIZE=2
@@ -461,7 +466,7 @@ declare -gA MODELS=(
     VLLM_PORT=8000
     RAY_OBJECT_STORE_GB=2
     ENFORCE_EAGER=1
-	HF_HUB_OFFLINE=1
+    NUM_SPECULATIVE_TOKENS=0
   "
 
 )
