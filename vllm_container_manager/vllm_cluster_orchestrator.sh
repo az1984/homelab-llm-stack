@@ -63,7 +63,7 @@ ensure_container() {
       while IFS='=' read -r key value; do
         key=$(echo "$key" | xargs)
         value=$(echo "$value" | xargs)
-        [[ -n "$key" && -n "$value" ]] && profile_env_args="${profile_env_args} -e ${key}=\"${value}\""
+        [[ -n "$key" && -n "$value" ]] && profile_env_args="${profile_env_args} -e ${key}='${value}'"
       done <<< "${model_config}"
     fi
   fi
