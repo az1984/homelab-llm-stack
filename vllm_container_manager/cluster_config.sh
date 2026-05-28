@@ -168,6 +168,31 @@ declare -gA MODELS=(
   # Qwen3.5 (GDN/Mamba hybrid — compressed-tensors quant format)
   # =========================================================================
 
+  # Qwen3.5-9B bf16: always-on fast-path, single node, cohabits with heavy model
+  # Vision-capable (native Qwen3.5 VLM). Serves Hermes chat-quick tier.
+  # ~18GB weights bf16 + KV. Deploy on any idle node alongside heavy model.
+  # Port 8002 for cohabitation (heavy model on 8000).
+	[qwen3.5-9b-bf16]="
+		DOCKER_IMAGE=vllm-qwen35-v2
+		MODEL_DIR=/mnt/network/data/models/huggingface/hf/Qwen/Qwen3.5-9B
+		SERVED_MODEL_NAME=chat-quick,chat-quick-qwen,qwen35-9b
+		TENSOR_PARALLEL_SIZE=1
+		MAX_MODEL_LEN=65536
+		MAX_NUM_SEQS=6
+		MAX_NUM_BATCHED_TOKENS=8192
+		GPU_MEMORY_UTILIZATION=0.30
+		ENABLE_PREFIX_CACHING=1
+		ENABLE_CHUNKED_PREFILL=1
+		KV_CACHE_DTYPE=fp8
+		TRUST_REMOTE_CODE=1
+		ENABLE_AUTO_TOOL_CHOICE=1
+		TOOL_CALL_PARSER=qwen3_coder
+		REASONING_PARSER=qwen3
+		VLLM_PORT=8002
+		RAY_OBJECT_STORE_GB=1
+		ENFORCE_EAGER=1
+	"
+
   # Qwen3.5-122B v2: PRODUCTION — Albond hybrid INT4+FP8 + MTP-2
   # TP=1 per node, HAProxy load-balances across independent nodes
   # Perf: 29-44 tok/s single-stream (MTP-2, 95-100% acceptance rate)
