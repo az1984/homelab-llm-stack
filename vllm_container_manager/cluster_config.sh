@@ -36,6 +36,7 @@ declare -gA CUSTOM_IMAGES=(
   [vllm-qwen35-v2]="192.168.2.42:5000/vllm-qwen35-v2:latest"
   [vllm-sm121]="192.168.2.42:5000/vllm-sm121:latest"
   [vllm-sm121-397b]="192.168.2.42:5000/vllm-sm121-397b:latest"
+  [vllm-node]="192.168.2.42:5000/vllm-node:latest"
 )
 
 # Images that require a specific entrypoint (NGC-based images need their setup script)
@@ -227,6 +228,35 @@ declare -gA MODELS=(
     ENFORCE_EAGER=0
     SPECULATIVE_METHOD=mtp
     SPECULATIVE_NUM_TOKENS=2
+  "
+
+  # Qwen3.5-122B: spark-vllm-docker 0.21.1 image test (no Albond patches)
+  # Purpose: benchmark baseline — does 0.21.1 + tf5 close the 32→51 tok/s gap
+  # without the hybrid INT4+FP8 + INT8 LM head patches?
+  # Same model dir, same flags as tp1. Compare bench_sweep output directly.
+  # entrypoint: spark-vllm-docker uses /bin/bash (no nvidia_entrypoint.sh)
+  [qwen3.5-122b-tp1-test]="
+    DOCKER_IMAGE=vllm-node
+    MODEL_DIR=/opt/ai-models/local/qwen35-122b-hybrid-int4fp8
+    SERVED_MODEL_NAME=qwen35-122b-a10b
+    AUTO_AWQ_MARLIN=0
+    TENSOR_PARALLEL_SIZE=1
+    MAX_MODEL_LEN=240000
+    MAX_NUM_SEQS=6
+    MAX_NUM_BATCHED_TOKENS=8192
+    GPU_MEMORY_UTILIZATION=0.80
+    ENABLE_PREFIX_CACHING=0
+    ENABLE_CHUNKED_PREFILL=1
+    KV_CACHE_DTYPE=fp8
+    TRUST_REMOTE_CODE=1
+    ENABLE_AUTO_TOOL_CHOICE=1
+    TOOL_CALL_PARSER=qwen3_xml
+    REASONING_PARSER=qwen3
+    VLLM_PORT=8001
+    RAY_OBJECT_STORE_GB=1
+    ENFORCE_EAGER=0
+    SPECULATIVE_METHOD=
+    SPECULATIVE_NUM_TOKENS=
   "
 
   # Qwen3.5-122B: TP=2 fallback (eugr image, no MTP, cyankiwi model)
