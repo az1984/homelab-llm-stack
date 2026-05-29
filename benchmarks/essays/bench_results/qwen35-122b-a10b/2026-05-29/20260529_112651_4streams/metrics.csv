@@ -1,0 +1,5 @@
+stream_id|subject|finish_reason|prompt_tokens|completion_tokens|total_tokens|wall_seconds|tok_per_sec
+2|The Engineering Behind Medieval Cathedral Construction|stop|88|2807|2895|152.561206000|18.3
+1|Roman Empire Taxation and Its Impact on Provincial Economies|stop|93|2861|2954|153.006300000|18.6
+3|How Mycorrhizal Networks Enable Forest Communication|stop|92|3215|3307|165.675961000|19.4
+4|The Rise and Fall of the Hanseatic League|stop|92|3189|3281|166.970312000|19.0

@@ -1,0 +1,21 @@
+[sweep] ============================================
+[sweep] Benchmark sweep: 1 to 4 streams
+[sweep] Subjects file:   bench_subjects.txt (40 subjects)
+[sweep] Base offset:     0
+[sweep] Max tokens:      2048
+[sweep] Log file:        bench_logs/sweep_20260529_111355_1-4streams.log
+[sweep] Passthrough:     none
+[sweep] ============================================
+[sweep] 
+[sweep] --------------------------------------------
+[sweep] Run 1/4: 1 concurrent stream(s), offset 0
+[sweep] --------------------------------------------
+[bench] ============================================
+[bench] Benchmark: 1 concurrent streams
+[bench] Host: 192.168.2.42:8000
+[bench] Model: chat-heavy,chat-heavy-qwen,qwen35-122b-a10b
+[bench] Max tokens: 2048
+[bench] Output: bench_results/20260529_111355_1streams
+[bench] ============================================
+[bench] Starting stream 1/1: Roman Empire Taxation and Its Impact on Provincial Economies
+[bench]   Stream 1: FAILED (Roman Empire Taxation and Its Impact on Provincial Economies)

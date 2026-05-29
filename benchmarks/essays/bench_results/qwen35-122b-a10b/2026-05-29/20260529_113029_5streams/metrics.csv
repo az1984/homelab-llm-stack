@@ -1,0 +1,6 @@
+stream_id|subject|finish_reason|prompt_tokens|completion_tokens|total_tokens|wall_seconds|tok_per_sec
+5|Neuroplasticity and Second Language Acquisition in Adults|stop|92|2842|2934|162.211573000|17.5
+3|How Mycorrhizal Networks Enable Forest Communication|stop|92|3172|3264|182.512945000|17.3
+4|The Rise and Fall of the Hanseatic League|stop|92|3249|3341|185.673173000|17.4
+2|The Engineering Behind Medieval Cathedral Construction|stop|88|3491|3579|191.799549000|18.2
+1|Roman Empire Taxation and Its Impact on Provincial Economies|stop|93|3667|3760|200.926100000|18.2
