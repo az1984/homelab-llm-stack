@@ -265,10 +265,11 @@ BuildVLLMArgs() {
     --dtype "${DTYPE}"
     --max-model-len "${MAX_MODEL_LEN}"
     --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}"
-    --distributed-executor-backend ray
     --tensor-parallel-size "${TENSOR_PARALLEL_SIZE}"
     --pipeline-parallel-size "${PIPELINE_PARALLEL_SIZE}"
   )
+  # Ray executor only needed for multi-node TP; TP=1 uses multiproc (faster, no Ray overhead)
+  [[ "${TENSOR_PARALLEL_SIZE}" -gt 1 ]] && args+=(--distributed-executor-backend ray)
   
   # Split comma-separated model names into separate flags
   IFS=',' read -ra model_names <<< "${SERVED_MODEL_NAME}"
@@ -358,7 +359,14 @@ LoadModel() {
   Log "Loading model: ${MODEL_DIR}"
   Log "  Served as: ${SERVED_MODEL_NAME}"
   Log "  Tensor parallel: ${TENSOR_PARALLEL_SIZE}"
-  
+
+  # TP=1: unset RAY_ADDRESS so vLLM doesn't auto-detect the Ray cluster
+  # and fall back to using the Ray executor instead of multiproc
+  if [[ "${TENSOR_PARALLEL_SIZE}" -le 1 ]]; then
+    Log "  Executor: multiproc (TP=1, Ray disabled)"
+    unset RAY_ADDRESS
+  fi
+
   local cmd
   cmd="$(BuildVLLMArgs)"
   

@@ -264,33 +264,38 @@ cmd_load_model() {
     done
   fi
   
-  Log "Starting Ray cluster (${tp_size} nodes, ${ray_store_gb}GB object store per node)"
   Log "Using nodes: ${nodes_to_use[*]}"
-  
-  export RAY_OBJECT_STORE_GB="${ray_store_gb}"
-  
-  # Start Ray on selected nodes (in parallel)
-  for node_num in "${nodes_to_use[@]}"; do
-    local node_name=$(get_node_info $node_num name)
-    local node_ip_i=$(get_node_info $node_num lan_ip)
-    local fabric_ip=$(get_node_info $node_num fabric_ip)
-    
-    Log "Starting Ray on node ${node_num} (${node_name})"
-    (
-      ssh admin@${node_ip_i} "sudo docker exec \
-        -e THIS_NODE=${node_num} \
-        -e RAY_NODE_IP=${fabric_ip} \
-        -e RAY_HEAD_IP=${head_fabric_ip} \
-        -e RAY_OBJECT_STORE_GB=${ray_store_gb} \
-        vllm-node-${node_num} /opt/vllm_cluster.sh start-ray"
-    ) &
-  done
-  
-  # Wait for all Ray processes to finish starting
-  wait
-  
-  Log "Waiting for Ray to stabilize (5s)"
-  sleep 5
+
+  # TP=1: skip Ray entirely — single-node uses multiproc executor
+  if [[ "${tp_size}" -gt 1 ]]; then
+    Log "Starting Ray cluster (${tp_size} nodes, ${ray_store_gb}GB object store per node)"
+    export RAY_OBJECT_STORE_GB="${ray_store_gb}"
+
+    # Start Ray on selected nodes (in parallel)
+    for node_num in "${nodes_to_use[@]}"; do
+      local node_name=$(get_node_info $node_num name)
+      local node_ip_i=$(get_node_info $node_num lan_ip)
+      local fabric_ip=$(get_node_info $node_num fabric_ip)
+
+      Log "Starting Ray on node ${node_num} (${node_name})"
+      (
+        ssh admin@${node_ip_i} "sudo docker exec \
+          -e THIS_NODE=${node_num} \
+          -e RAY_NODE_IP=${fabric_ip} \
+          -e RAY_HEAD_IP=${head_fabric_ip} \
+          -e RAY_OBJECT_STORE_GB=${ray_store_gb} \
+          vllm-node-${node_num} /opt/vllm_cluster.sh start-ray"
+      ) &
+    done
+
+    # Wait for all Ray processes to finish starting
+    wait
+
+    Log "Waiting for Ray to stabilize (5s)"
+    sleep 5
+  else
+    Log "TP=1: skipping Ray — using multiproc executor"
+  fi
   
   # Build env args for vLLM (profile vars already baked into container,
   # but pass them again on exec for any that might be overridden)

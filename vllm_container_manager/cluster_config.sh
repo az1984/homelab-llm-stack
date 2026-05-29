@@ -37,6 +37,7 @@ declare -gA CUSTOM_IMAGES=(
   [vllm-sm121]="192.168.2.42:5000/vllm-sm121:latest"
   [vllm-sm121-397b]="192.168.2.42:5000/vllm-sm121-397b:latest"
   [vllm-node]="192.168.2.42:5000/vllm-node:latest"
+  [vllm-cluster-universal]="192.168.2.42:5000/vllm-cluster-universal:2026-05-29_b01"
 )
 
 # Images that require a specific entrypoint (NGC-based images need their setup script)
@@ -224,7 +225,6 @@ declare -gA MODELS=(
     TOOL_CALL_PARSER=qwen3_xml
     REASONING_PARSER=qwen3
     VLLM_PORT=8000
-    RAY_OBJECT_STORE_GB=1
     ENFORCE_EAGER=0
     SPECULATIVE_METHOD=mtp
     SPECULATIVE_NUM_TOKENS=2
@@ -236,7 +236,7 @@ declare -gA MODELS=(
   # Same model dir, same flags as tp1. Compare bench_sweep output directly.
   # entrypoint: spark-vllm-docker uses /bin/bash (no nvidia_entrypoint.sh)
   [qwen3.5-122b-tp1-test]="
-    DOCKER_IMAGE=vllm-node
+    DOCKER_IMAGE=vllm-cluster-universal
     MODEL_DIR=/opt/ai-models/local/qwen35-122b-hybrid-int4fp8
     SERVED_MODEL_NAME=qwen35-122b-a10b
     AUTO_AWQ_MARLIN=0
@@ -253,10 +253,9 @@ declare -gA MODELS=(
     TOOL_CALL_PARSER=qwen3_xml
     REASONING_PARSER=qwen3
     VLLM_PORT=8001
-    RAY_OBJECT_STORE_GB=1
-    ENFORCE_EAGER=0
-    SPECULATIVE_METHOD=
-    SPECULATIVE_NUM_TOKENS=
+	ENFORCE_EAGER=0
+    SPECULATIVE_METHOD=mtp
+    SPECULATIVE_NUM_TOKENS=2
   "
 
   # Qwen3.5-122B: TP=2 fallback (eugr image, no MTP, cyankiwi model)
