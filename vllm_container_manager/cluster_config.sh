@@ -208,7 +208,7 @@ declare -gA MODELS=(
   # Perf: 29-44 tok/s single-stream (MTP-2, 95-100% acceptance rate)
   # Deploy: ./vllm_cluster_orchestrator.sh --nodes 1 start-cluster 1 qwen3.5-122b-v2
   #         ./vllm_cluster_orchestrator.sh --nodes 2 start-cluster 1 qwen3.5-122b-v2
-  [qwen3.5-122b-tp1]="
+  [qwen3.5-122b-tp1-cust]="
     DOCKER_IMAGE=vllm-qwen35-v2
     MODEL_DIR=/opt/ai-models/local/qwen35-122b-hybrid-int4fp8
     SERVED_MODEL_NAME=qwen35-122b-a10b
@@ -236,7 +236,7 @@ declare -gA MODELS=(
   # without the hybrid INT4+FP8 + INT8 LM head patches?
   # Same model dir, same flags as tp1. Compare bench_sweep output directly.
   # entrypoint: spark-vllm-docker uses /bin/bash (no nvidia_entrypoint.sh)
-  [qwen3.5-122b-tp1-test]="
+  [qwen3.5-122b-tp1-univ]="
     DOCKER_IMAGE=vllm-cluster-universal
     MODEL_DIR=/opt/ai-models/local/qwen35-122b-hybrid-int4fp8
     SERVED_MODEL_NAME=qwen35-122b-a10b
