@@ -1,0 +1,5 @@
+stream_id|subject|finish_reason|prompt_tokens|completion_tokens|total_tokens|wall_seconds|tok_per_sec
+4|The Architecture of Roman Aqueducts and Water Distribution|stop|92|2812|2904|175.944721000|15.9
+1|How Cephalopod Intelligence Evolved Independently of Vertebrates|stop|95|2833|2928|176.440725000|16.0
+3|Epigenetic Inheritance and What It Means for Evolution|stop|93|2903|2996|178.894849000|16.2
+2|The Role of Salt in Preserving Empires and Shaping Borders|stop|95|3104|3199|186.196121000|16.6

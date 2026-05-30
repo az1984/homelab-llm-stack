@@ -1,0 +1,4 @@
+stream_id|subject|finish_reason|prompt_tokens|completion_tokens|total_tokens|wall_seconds|tok_per_sec
+2|How Cephalopod Intelligence Evolved Independently of Vertebrates|stop|95|3061|3156|158.136363000|19.3
+3|The Role of Salt in Preserving Empires and Shaping Borders|stop|95|3072|3167|161.707007000|18.9
+1|Byzantine Silk Trade and the Economics of Luxury Goods|stop|92|3152|3244|162.330897000|19.4

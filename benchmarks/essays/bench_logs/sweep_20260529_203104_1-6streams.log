@@ -1,0 +1,25 @@
+[sweep] ============================================
+[sweep] Benchmark sweep: 1 to 6 streams
+[sweep] Subjects file:   ./bench_subjects.txt (40 subjects)
+[sweep] Base offset:     22 (random)
+[sweep] Max tokens:      6144
+[sweep] Log file:        bench_logs/sweep_20260529_203104_1-6streams.log
+[sweep] Passthrough:     --model qwen35-122b-a10b --subjects ./bench_subjects.txt --host 192.168.2.42 --port 8001 --max-tokens 6144
+[sweep] ============================================
+[sweep] 
+[sweep] --------------------------------------------
+[sweep] Run 1/6: 1 concurrent stream(s), offset 22
+[sweep] --------------------------------------------
+[bench] ============================================
+[bench] Benchmark: 1 concurrent streams
+[bench] Host: 192.168.2.42:8001
+[bench] Model: qwen35-122b-a10b
+[bench] Max tokens: 6144
+[bench] Output: bench_results/20260529_203104_1streams
+[bench] ============================================
+[bench] Starting stream 1/1: How Cephalopod Intelligence Evolved Independently of Vertebrates
+[bench]   Stream 1: 3173 tokens in 75.346080000s (42.1 tok/s) [stop]
+[bench] 
+[bench] ============================================
+[bench] Results
+[bench] ============================================

@@ -1,0 +1,6 @@
+stream_id|subject|finish_reason|prompt_tokens|completion_tokens|total_tokens|wall_seconds|tok_per_sec
+2|Epigenetic Inheritance and What It Means for Evolution|stop|93|2762|2855|221.673738000|12.4
+1|The Role of Salt in Preserving Empires and Shaping Borders|stop|95|2645|2740|224.849933000|11.7
+5|Quantum Tunneling and Its Role in Biological Enzyme Catalysis|stop|94|3184|3278|240.712337000|13.2
+3|The Architecture of Roman Aqueducts and Water Distribution|stop|92|3309|3401|249.104902000|13.2
+4|How the Black Death Restructured European Labor Markets|stop|92|3308|3400|249.867844000|13.2

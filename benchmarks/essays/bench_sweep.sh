@@ -186,7 +186,9 @@ function CoreExec {
     "${BENCH_SCRIPT}" \
       --streams "${n}" \
       --offset  "${offset}" \
-      "${PASSTHROUGH_ARGS[@]+"${PASSTHROUGH_ARGS[@]}"}"
+      "${PASSTHROUGH_ARGS[@]+"${PASSTHROUGH_ARGS[@]}"}" || {
+      _Log "WARNING: bench run ${n} exited non-zero — continuing sweep"
+    }
 
     _Log ""
   done

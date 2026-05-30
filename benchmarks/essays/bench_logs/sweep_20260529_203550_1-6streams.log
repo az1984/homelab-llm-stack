@@ -1,0 +1,151 @@
+[sweep] ============================================
+[sweep] Benchmark sweep: 1 to 6 streams
+[sweep] Subjects file:   ./bench_subjects.txt (40 subjects)
+[sweep] Base offset:     19 (random)
+[sweep] Max tokens:      6144
+[sweep] Log file:        bench_logs/sweep_20260529_203550_1-6streams.log
+[sweep] Passthrough:     --model qwen35-122b-a10b --subjects ./bench_subjects.txt --host 192.168.2.42 --port 8001 --max-tokens 6144
+[sweep] ============================================
+[sweep] 
+[sweep] --------------------------------------------
+[sweep] Run 1/6: 1 concurrent stream(s), offset 19
+[sweep] --------------------------------------------
+[bench] ============================================
+[bench] Benchmark: 1 concurrent streams
+[bench] Host: 192.168.2.42:8001
+[bench] Model: qwen35-122b-a10b
+[bench] Max tokens: 6144
+[bench] Output: bench_results/20260529_203550_1streams
+[bench] ============================================
+[bench] Starting stream 1/1: Chaos Theory Applications in Weather Prediction Models
+[bench]   Stream 1: 2841 tokens in 64.334943000s (44.1 tok/s) [stop]
+[bench] 
+[bench] ============================================
+[bench] Results
+[bench] ============================================
+[sweep] WARNING: bench run 1 exited non-zero — continuing sweep
+[sweep] 
+[sweep] --------------------------------------------
+[sweep] Run 2/6: 2 concurrent stream(s), offset 20
+[sweep] --------------------------------------------
+[bench] ============================================
+[bench] Benchmark: 2 concurrent streams
+[bench] Host: 192.168.2.42:8001
+[bench] Model: qwen35-122b-a10b
+[bench] Max tokens: 6144
+[bench] Output: bench_results/20260529_203655_2streams
+[bench] ============================================
+[bench] Starting stream 1/2: The Mechanics of Glacial Carving and Fjord Formation
+[bench] Starting stream 2/2: Byzantine Silk Trade and the Economics of Luxury Goods
+[bench]   Stream 2: 3037 tokens in 123.648679000s (24.5 tok/s) [stop]
+[bench]   Stream 1: 3269 tokens in 127.264145000s (25.6 tok/s) [stop]
+[bench] 
+[bench] ============================================
+[bench] Results
+[bench] ============================================
+[sweep] WARNING: bench run 2 exited non-zero — continuing sweep
+[sweep] 
+[sweep] --------------------------------------------
+[sweep] Run 3/6: 3 concurrent stream(s), offset 21
+[sweep] --------------------------------------------
+[bench] ============================================
+[bench] Benchmark: 3 concurrent streams
+[bench] Host: 192.168.2.42:8001
+[bench] Model: qwen35-122b-a10b
+[bench] Max tokens: 6144
+[bench] Output: bench_results/20260529_203902_3streams
+[bench] ============================================
+[bench] Starting stream 1/3: Byzantine Silk Trade and the Economics of Luxury Goods
+[bench] Starting stream 2/3: How Cephalopod Intelligence Evolved Independently of Vertebrates
+[bench] Starting stream 3/3: The Role of Salt in Preserving Empires and Shaping Borders
+[bench]   Stream 2: 3061 tokens in 158.136363000s (19.3 tok/s) [stop]
+[bench]   Stream 3: 3072 tokens in 161.707007000s (18.9 tok/s) [stop]
+[bench]   Stream 1: 3152 tokens in 162.330897000s (19.4 tok/s) [stop]
+[bench] 
+[bench] ============================================
+[bench] Results
+[bench] ============================================
+[sweep] WARNING: bench run 3 exited non-zero — continuing sweep
+[sweep] 
+[sweep] --------------------------------------------
+[sweep] Run 4/6: 4 concurrent stream(s), offset 22
+[sweep] --------------------------------------------
+[bench] ============================================
+[bench] Benchmark: 4 concurrent streams
+[bench] Host: 192.168.2.42:8001
+[bench] Model: qwen35-122b-a10b
+[bench] Max tokens: 6144
+[bench] Output: bench_results/20260529_204144_4streams
+[bench] ============================================
+[bench] Starting stream 1/4: How Cephalopod Intelligence Evolved Independently of Vertebrates
+[bench] Starting stream 2/4: The Role of Salt in Preserving Empires and Shaping Borders
+[bench] Starting stream 3/4: Epigenetic Inheritance and What It Means for Evolution
+[bench] Starting stream 4/4: The Architecture of Roman Aqueducts and Water Distribution
+[bench]   Stream 4: 2812 tokens in 175.944721000s (15.9 tok/s) [stop]
+[bench]   Stream 1: 2833 tokens in 176.440725000s (16.0 tok/s) [stop]
+[bench]   Stream 3: 2903 tokens in 178.894849000s (16.2 tok/s) [stop]
+[bench]   Stream 2: 3104 tokens in 186.196121000s (16.6 tok/s) [stop]
+[bench] 
+[bench] ============================================
+[bench] Results
+[bench] ============================================
+[sweep] WARNING: bench run 4 exited non-zero — continuing sweep
+[sweep] 
+[sweep] --------------------------------------------
+[sweep] Run 5/6: 5 concurrent stream(s), offset 23
+[sweep] --------------------------------------------
+[bench] ============================================
+[bench] Benchmark: 5 concurrent streams
+[bench] Host: 192.168.2.42:8001
+[bench] Model: qwen35-122b-a10b
+[bench] Max tokens: 6144
+[bench] Output: bench_results/20260529_204451_5streams
+[bench] ============================================
+[bench] Starting stream 1/5: The Role of Salt in Preserving Empires and Shaping Borders
+[bench] Starting stream 2/5: Epigenetic Inheritance and What It Means for Evolution
+[bench] Starting stream 3/5: The Architecture of Roman Aqueducts and Water Distribution
+[bench] Starting stream 4/5: How the Black Death Restructured European Labor Markets
+[bench] Starting stream 5/5: Quantum Tunneling and Its Role in Biological Enzyme Catalysis
+[bench]   Stream 2: 2762 tokens in 221.673738000s (12.4 tok/s) [stop]
+[bench]   Stream 1: 2645 tokens in 224.849933000s (11.7 tok/s) [stop]
+[bench]   Stream 5: 3184 tokens in 240.712337000s (13.2 tok/s) [stop]
+[bench]   Stream 3: 3309 tokens in 249.104902000s (13.2 tok/s) [stop]
+[bench]   Stream 4: 3308 tokens in 249.867844000s (13.2 tok/s) [stop]
+[bench] 
+[bench] ============================================
+[bench] Results
+[bench] ============================================
+[sweep] WARNING: bench run 5 exited non-zero — continuing sweep
+[sweep] 
+[sweep] --------------------------------------------
+[sweep] Run 6/6: 6 concurrent stream(s), offset 24
+[sweep] --------------------------------------------
+[bench] ============================================
+[bench] Benchmark: 6 concurrent streams
+[bench] Host: 192.168.2.42:8001
+[bench] Model: qwen35-122b-a10b
+[bench] Max tokens: 6144
+[bench] Output: bench_results/20260529_204901_6streams
+[bench] ============================================
+[bench] Starting stream 1/6: Epigenetic Inheritance and What It Means for Evolution
+[bench] Starting stream 2/6: The Architecture of Roman Aqueducts and Water Distribution
+[bench] Starting stream 3/6: How the Black Death Restructured European Labor Markets
+[bench] Starting stream 4/6: Quantum Tunneling and Its Role in Biological Enzyme Catalysis
+[bench] Starting stream 5/6: The Cognitive Science of Chess Expertise and Pattern Recognition
+[bench] Starting stream 6/6: Iron Age Smelting Techniques and Their Spread Across Continents
+[bench]   Stream 5: 3011 tokens in 311.136557000s (9.6 tok/s) [stop]
+[bench]   Stream 2: 3117 tokens in 313.662501000s (9.9 tok/s) [stop]
+[bench]   Stream 1: 3293 tokens in 324.550152000s (10.1 tok/s) [stop]
+[bench]   Stream 4: 3377 tokens in 325.524892000s (10.3 tok/s) [stop]
+[bench]   Stream 6: 3371 tokens in 332.571315000s (10.1 tok/s) [stop]
+[bench]   Stream 3: 3634 tokens in 337.776024000s (10.7 tok/s) [stop]
+[bench] 
+[bench] ============================================
+[bench] Results
+[bench] ============================================
+[sweep] WARNING: bench run 6 exited non-zero — continuing sweep
+[sweep] 
+[sweep] ============================================
+[sweep] Sweep complete. Total wall time: 1128.257237000s
+[sweep] Full log: bench_logs/sweep_20260529_203550_1-6streams.log
+[sweep] ============================================
