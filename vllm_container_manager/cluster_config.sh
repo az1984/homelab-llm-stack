@@ -37,7 +37,7 @@ declare -gA CUSTOM_IMAGES=(
   [vllm-sm121]="192.168.2.42:5000/vllm-sm121:latest"
   [vllm-sm121-397b]="192.168.2.42:5000/vllm-sm121-397b:latest"
   [vllm-node]="192.168.2.42:5000/vllm-node:latest"
-  [vllm-cluster-universal]="192.168.2.42:5000/vllm-cluster-universal:2026-05-29_b01"
+  [vllm-cluster-universal]="192.168.2.42:5000/vllm-cluster-universal:2026-05-29_b03"
 )
 
 # Images that require a specific entrypoint (NGC-based images need their setup script)
@@ -48,6 +48,7 @@ declare -gA IMAGE_ENTRYPOINTS=(
   [vllm-qwen35-v2]="/opt/nvidia/nvidia_entrypoint.sh"
   [vllm-sm121]="/opt/nvidia/nvidia_entrypoint.sh"
   [vllm-sm121-397b]="/opt/nvidia/nvidia_entrypoint.sh"
+  [vllm-cluster-universal]="/opt/entrypoint.sh"
 )
 
 declare -gA MODELS=(

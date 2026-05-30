@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
 # bench_sweep.sh
 #
-# Runs bench_essays.sh in sequence for 1..N concurrent streams,
+# Runs bench_essays.sh in sequence for START..N concurrent streams,
 # capturing stdout to a timestamped logfile.
 #
 # Usage:
 #   ./bench_sweep.sh                          # 1-4 streams, defaults
 #   ./bench_sweep.sh --streams 6              # 1-6 streams
+#   ./bench_sweep.sh --start 3 --streams 6   # 3,4,5,6 streams only
 #   ./bench_sweep.sh --random-offset          # randomize subject start
 #   ./bench_sweep.sh --host 192.168.2.44      # different node
 #
-# All flags except --streams and --random-offset are passed through
+# All flags except --streams, --start, and --random-offset are passed through
 # to bench_essays.sh unchanged.
 
 set -euo pipefail
@@ -20,6 +21,7 @@ set -euo pipefail
 # ─────────────────────────────────────────────────────────────────────────────
 BENCH_SCRIPT="${BENCH_SCRIPT:-./bench_essays.sh}"
 SUBJECTS_FILE="${SUBJECTS_FILE:-bench_subjects.txt}"
+MIN_STREAMS="${MIN_STREAMS:-1}"
 MAX_STREAMS="${MAX_STREAMS:-4}"
 MAX_TOKENS="${MAX_TOKENS:-2048}"
 RANDOM_OFFSET=0
@@ -36,6 +38,8 @@ function ParseArgsCLI {
     case "$1" in
       --streams)
         MAX_STREAMS="$2"; shift 2 ;;
+      --start)
+        MIN_STREAMS="$2"; shift 2 ;;
       --random-offset)
         RANDOM_OFFSET=1; shift ;;
       --subjects-file|--subjects)
@@ -60,11 +64,12 @@ function _Usage {
   cat <<'EOF'
 Usage: bench_sweep.sh [OPTIONS]
 
-Runs bench_essays.sh for stream counts 1 through --streams N in sequence.
+Runs bench_essays.sh for stream counts --start through --streams in sequence.
 All output is tee'd to a timestamped log file.
 
 Options:
   --streams N           Max concurrent streams to sweep up to (default: 4)
+  --start N             Start from this stream count (default: 1)
   --random-offset       Randomize subject start offset to avoid cache hits
   --host HOST           Passed through to bench_essays.sh
   --port PORT           Passed through to bench_essays.sh
@@ -75,6 +80,7 @@ Options:
 
 Examples:
   ./bench_sweep.sh --streams 4 --random-offset
+  ./bench_sweep.sh --start 3 --streams 6 --port 8001 --model qwen35-122b-a10b
   ./bench_sweep.sh --streams 6 --host 192.168.2.44 --model chat-heavy
 EOF
 }
@@ -123,6 +129,11 @@ function CoreExec {
     exit 1
   fi
 
+  if [[ ${MIN_STREAMS} -gt ${MAX_STREAMS} ]]; then
+    echo "ERROR: --start ${MIN_STREAMS} is greater than --streams ${MAX_STREAMS}"
+    exit 1
+  fi
+
   local subject_count
   subject_count=$(_SubjectCount)
   if [[ ${subject_count} -lt ${MAX_STREAMS} ]]; then
@@ -140,13 +151,13 @@ function CoreExec {
   mkdir -p "${LOG_DIR}"
   local timestamp
   timestamp=$(date +%Y%m%d_%H%M%S)
-  local log_file="${LOG_DIR}/sweep_${timestamp}_1-${MAX_STREAMS}streams.log"
+  local log_file="${LOG_DIR}/sweep_${timestamp}_${MIN_STREAMS}-${MAX_STREAMS}streams.log"
 
   # Tee all output to log from this point forward
   exec > >(tee -a "${log_file}") 2>&1
 
   _Log "============================================"
-  _Log "Benchmark sweep: 1 to ${MAX_STREAMS} streams"
+  _Log "Benchmark sweep: ${MIN_STREAMS} to ${MAX_STREAMS} streams"
   _Log "Subjects file:   ${SUBJECTS_FILE} (${subject_count} subjects)"
   _Log "Base offset:     ${base_offset}$([ ${RANDOM_OFFSET} -eq 1 ] && echo ' (random)' || echo '')"
   _Log "Max tokens:      ${MAX_TOKENS}"
@@ -158,7 +169,7 @@ function CoreExec {
   local sweep_start
   sweep_start=$(date +%s.%N)
 
-  for (( n=1; n<=MAX_STREAMS; n++ )); do
+  for (( n=MIN_STREAMS; n<=MAX_STREAMS; n++ )); do
     local offset=$(( base_offset + n - 1 ))
 
     # Make sure we don't run off the end of the subjects file
@@ -169,7 +180,7 @@ function CoreExec {
     fi
 
     _Log "--------------------------------------------"
-    _Log "Run ${n}/${MAX_STREAMS}: ${n} concurrent stream(s), offset ${offset}"
+    _Log "Run $((n - MIN_STREAMS + 1))/$((MAX_STREAMS - MIN_STREAMS + 1)): ${n} concurrent stream(s), offset ${offset}"
     _Log "--------------------------------------------"
 
     "${BENCH_SCRIPT}" \

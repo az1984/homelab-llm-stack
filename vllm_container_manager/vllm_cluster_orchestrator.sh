@@ -91,7 +91,7 @@ ensure_container() {
   local entrypoint_args
   if [[ -n "$entrypoint" ]]; then
     entrypoint_args="--entrypoint ${entrypoint}"
-    local run_cmd="bash -c 'sleep infinity'"
+    local run_cmd="sleep infinity"
   else
     entrypoint_args="--entrypoint /bin/bash"
     local run_cmd="-c 'sleep infinity'"
