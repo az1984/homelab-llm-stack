@@ -16,7 +16,7 @@
 #   NFS (NAS):  /mnt/network/data/models/huggingface/hf/<vendor>/<model>
 #   NEVER use:  /mnt/network/ai-models/...  (that's the SMB admin mount, not runtime)
 
-declare -gA NODES=(
+declare -A NODES=(
   [1]="192.168.2.42:magnesium:10.10.10.1"
   [2]="192.168.2.43:aluminium:10.10.10.2"
   [3]="192.168.2.44:silicon:10.10.10.3"
@@ -25,7 +25,7 @@ declare -gA NODES=(
 
 # Custom Docker images - map name to full image path
 # Add new images here, then reference them in model profiles via DOCKER_IMAGE=name
-declare -gA CUSTOM_IMAGES=(
+declare -A CUSTOM_IMAGES=(
   [vllm-official]="vllm/vllm-openai:v0.17.1"
   [vllm-gb10-community]="scitrera/dgx-spark-vllm:0.14.0rc2-t5"
   [vllm-gb10-old]="hellohal2064/vllm-dgx-spark-gb10:latest"
@@ -42,7 +42,7 @@ declare -gA CUSTOM_IMAGES=(
 
 # Images that require a specific entrypoint (NGC-based images need their setup script)
 # Default (if not listed): /bin/bash
-declare -gA IMAGE_ENTRYPOINTS=(
+declare -A IMAGE_ENTRYPOINTS=(
   [vllm-community-eugr]="/opt/nvidia/nvidia_entrypoint.sh"
   [vllm-nvidia-official]="/opt/nvidia/nvidia_entrypoint.sh"
   [vllm-qwen35-v2]="/opt/nvidia/nvidia_entrypoint.sh"
@@ -51,7 +51,7 @@ declare -gA IMAGE_ENTRYPOINTS=(
   [vllm-cluster-universal]="/opt/entrypoint.sh"
 )
 
-declare -gA MODELS=(
+declare -A MODELS=(
 
   # =========================================================================
   # Qwen3 (standard transformer, NOT GDN — no Mamba quirks)

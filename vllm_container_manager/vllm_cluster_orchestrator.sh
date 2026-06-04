@@ -484,6 +484,10 @@ ARGS=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --help|-h)
+      COMMAND="help"
+      shift
+      ;;
     --nodes)
       parse_node_filter "$2"
       shift 2
@@ -501,7 +505,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$COMMAND" ]]; then
+if [[ -z "$COMMAND" || "$COMMAND" == "help" ]]; then
   cat <<'USAGE'
 Usage: ./vllm_cluster_orchestrator.sh [--nodes N,M,...] <command> [args]
 
@@ -547,10 +551,11 @@ Examples:
   # Unload model, keep containers
   ./vllm_cluster_orchestrator.sh --nodes 3,4 unload-model
 USAGE
-  exit 1
+  [[ "$COMMAND" == "help" ]] && exit 0 || exit 1
 fi
 
 case "$COMMAND" in
+  help) : ;;  # already handled above
   start-cluster) cmd_start_cluster "${ARGS[0]:-}" "${ARGS[1]:-}" ;;
   load-model) cmd_load_model "${ARGS[0]}" ;;
   unload-model|stop-model) cmd_stop_model ;;
