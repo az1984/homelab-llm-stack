@@ -108,9 +108,9 @@ declare -A MODELS=(
     DOCKER_IMAGE=vllm-jasl-ds4
     MODEL_DIR=/mnt/network/data/models/huggingface/hf/deepseek-ai/DeepSeek-V4-Flash
     SERVED_MODEL_NAME=deepseek-v4-flash-284b-a13b
-    TENSOR_PARALLEL_SIZE=2
+    TENSOR_PARALLEL_SIZE=3
     MAX_MODEL_LEN=524288
-    MAX_NUM_SEQS=2
+    MAX_NUM_SEQS=3
     GPU_MEMORY_UTILIZATION=0.15
     ENABLE_PREFIX_CACHING=1
     ENABLE_CHUNKED_PREFILL=1
@@ -132,7 +132,6 @@ declare -A MODELS=(
     VLLM_EXTRA_ARGS=--disable-custom-all-reduce
     NCCL_NVLS_ENABLE=0
     NCCL_SHM_DISABLE=1
-    RAY_memory_usage_threshold=0.995
   "
 
 # DeepSeek V4 Flash — W4A16-FP8 quant (pastapaul), TP=2
