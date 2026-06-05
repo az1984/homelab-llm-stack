@@ -39,6 +39,7 @@ declare -A CUSTOM_IMAGES=(
   [vllm-node]="192.168.2.42:5000/vllm-node:latest"
   [vllm-cluster-universal]="192.168.2.42:5000/vllm-cluster-universal:2026-05-29_b03"
   [vllm-eugr-0.22.0]="192.168.2.42:5000/vllm-eugr-0.22.0:2026-06-04_b01"
+  [vllm-jasl-ds4]="192.168.2.42:5000/vllm-jasl-ds4:2026-06-05_b01"
 )
 
 # Images that require a specific entrypoint (NGC-based images need their setup script)
@@ -104,7 +105,7 @@ declare -A MODELS=(
   # Deploy: ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster deepseek-v4-flash
   #         ./vllm_cluster_orchestrator.sh --nodes 3,4 load-model deepseek-v4-flash
   [deepseek-v4-flash]="
-    DOCKER_IMAGE=vllm-eugr-0.22.0
+    DOCKER_IMAGE=vllm-jasl-ds4
     MODEL_DIR=/mnt/network/data/models/huggingface/hf/deepseek-ai/DeepSeek-V4-Flash
     SERVED_MODEL_NAME=deepseek-v4-flash-284b-a13b
     TENSOR_PARALLEL_SIZE=2
@@ -127,6 +128,8 @@ declare -A MODELS=(
     RAY_MAX_WORKER_PORT=29000
     RAY_OBJECT_STORE_GB=2
     ENFORCE_EAGER=0
+    VLLM_MXFP4_MARLIN_DEEPGEMM_LAYERS=42
+    VLLM_TRITON_MLA_SPARSE_ALLOW_CUDAGRAPH=1
   "
 
   # DeepSeek V4 Flash — W4A16-FP8 quant (pastapaul), TP=2
