@@ -63,7 +63,11 @@ RUN_USER="${RUN_USER:-}"  # Empty = run as current user
 MODEL_DIR="${MODEL_DIR:-/opt/ai-models/hf/CHANGE_ME}"
 SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-model}"
 VLLM_HOST="${VLLM_HOST:-0.0.0.0}"
-VLLM_PORT="${VLLM_PORT:-8000}"
+# NOTE: We use VLLM_API_PORT (not VLLM_PORT) to avoid collision with vLLM's
+# internal env var. VLLM_PORT is reserved by vLLM for ZMQ IPC between the
+# APIServer and EngineCore processes. Setting it externally causes a port
+# conflict — both the HTTP server and the ZMQ socket try to bind the same port.
+VLLM_API_PORT="${VLLM_API_PORT:-${VLLM_PORT:-8000}}"  # fallback to VLLM_PORT for backwards compat
 QUANTIZATION="${QUANTIZATION:-}"
 DTYPE="${DTYPE:-float16}"
 AUTO_AWQ_MARLIN="${AUTO_AWQ_MARLIN:-1}"
@@ -171,7 +175,7 @@ RemovePIDFile() {
 
 RunCMD() {
   if [[ -n "${RUN_USER}" ]] && [[ "$(id -un)" != "${RUN_USER}" ]]; then
-    sudo -u "${RUN_USER}" -H --preserve-env=RAY_ADDRESS,RAY_NODE_IP,VLLM_HOST_IP,NCCL_SOCKET_IFNAME,NCCL_IB_HCA,NCCL_DEBUG,GLOO_SOCKET_IFNAME,UCX_NET_DEVICES,CUDA_HOME,PATH,LD_LIBRARY_PATH,QUANTIZATION,DTYPE,ENABLE_PREFIX_CACHING,ENABLE_CHUNKED_PREFILL,KV_CACHE_DTYPE,AUTO_AWQ_MARLIN,LOAD_FORMAT,COMPILATION_CONFIG,TOKENIZER_MODE,BLOCK_SIZE,HF_HUB_OFFLINE,VLLM_MASTER_PORT,VLLM_WORKER_PORT_BASE -- "$@"
+    sudo -u "${RUN_USER}" -H --preserve-env=RAY_ADDRESS,RAY_NODE_IP,VLLM_HOST_IP,NCCL_SOCKET_IFNAME,NCCL_IB_HCA,NCCL_DEBUG,GLOO_SOCKET_IFNAME,UCX_NET_DEVICES,CUDA_HOME,PATH,LD_LIBRARY_PATH,QUANTIZATION,DTYPE,ENABLE_PREFIX_CACHING,ENABLE_CHUNKED_PREFILL,KV_CACHE_DTYPE,AUTO_AWQ_MARLIN,LOAD_FORMAT,COMPILATION_CONFIG,TOKENIZER_MODE,BLOCK_SIZE,HF_HUB_OFFLINE,VLLM_MASTER_PORT,VLLM_WORKER_PORT_BASE,VLLM_API_PORT -- "$@"
   else
     "$@"
   fi
@@ -292,7 +296,7 @@ BuildVLLMArgs() {
     "${VLLM_PYTHON_BIN}" -m vllm.entrypoints.openai.api_server
     --model "${MODEL_DIR}"
     --host "${VLLM_HOST}"
-    --port "${VLLM_PORT}"
+    --port "${VLLM_API_PORT}"
     --dtype "${DTYPE}"
     --max-model-len "${MAX_MODEL_LEN}"
     --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}"
@@ -370,19 +374,19 @@ LoadModel() {
   
   # Ensure target port is free — kill any stale process holding it
   local port_pid
-  port_pid="$(ss -tlnp 2>/dev/null | grep ":${VLLM_PORT} " | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | head -1 || true)"
+  port_pid="$(ss -tlnp 2>/dev/null | grep ":${VLLM_API_PORT} " | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | head -1 || true)"
   if [[ -n "${port_pid}" ]]; then
-    Log "WARNING: Port ${VLLM_PORT} held by pid ${port_pid} — killing stale process"
+    Log "WARNING: Port ${VLLM_API_PORT} held by pid ${port_pid} — killing stale process"
     kill "${port_pid}" 2>/dev/null || true
     sleep 2
-    if ss -tlnp 2>/dev/null | grep -q ":${VLLM_PORT} "; then
+    if ss -tlnp 2>/dev/null | grep -q ":${VLLM_API_PORT} "; then
       kill -9 "${port_pid}" 2>/dev/null || true
       sleep 1
     fi
-    if ss -tlnp 2>/dev/null | grep -q ":${VLLM_PORT} "; then
-      Die "Cannot free port ${VLLM_PORT} — something is still holding it"
+    if ss -tlnp 2>/dev/null | grep -q ":${VLLM_API_PORT} "; then
+      Die "Cannot free port ${VLLM_API_PORT} — something is still holding it"
     fi
-    Log "  Port ${VLLM_PORT} freed"
+    Log "  Port ${VLLM_API_PORT} freed"
   fi
   
   # Rotate log: timestamped file + _latest symlink
@@ -415,7 +419,7 @@ LoadModel() {
   WritePIDFile "${VLLM_PIDFILE}" "${pid}"
   
   Log "vLLM started (pid=${pid})"
-  Log "API endpoint: http://${RAY_NODE_IP}:${VLLM_PORT}/v1"
+  Log "API endpoint: http://${RAY_NODE_IP}:${VLLM_API_PORT}/v1"
 }
 
 StopModel() {
@@ -538,7 +542,10 @@ Environment (model):
   QUANTIZATION=<method>      awq, gptq, fp8, etc.
   MAX_MODEL_LEN=<tokens>     Context length
   GPU_MEMORY_UTILIZATION=<f> Fraction (default: 0.92)
-  VLLM_PORT=<port>           API port (default: 8000)
+  VLLM_API_PORT=<port>        API server port (default: 8000)
+                             NOTE: Do NOT use VLLM_PORT — that is reserved by
+                             vLLM internally for ZMQ IPC and will cause a port
+                             conflict if set externally.
   VLLM_MASTER_PORT=<port>    PyTorch/NCCL distributed rendezvous port (default: 29500)
                              MUST differ from VLLM_PORT and Ray ports.
                              If running two TP>1 instances, give each a unique value.
