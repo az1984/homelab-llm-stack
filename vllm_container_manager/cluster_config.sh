@@ -111,7 +111,7 @@ declare -A MODELS=(
     TENSOR_PARALLEL_SIZE=2
     MAX_MODEL_LEN=524288
     MAX_NUM_SEQS=2
-    GPU_MEMORY_UTILIZATION=0.80
+    GPU_MEMORY_UTILIZATION=0.15
     ENABLE_PREFIX_CACHING=1
     ENABLE_CHUNKED_PREFILL=1
     KV_CACHE_DTYPE=fp8
@@ -122,32 +122,33 @@ declare -A MODELS=(
     ENABLE_AUTO_TOOL_CHOICE=1
     TOOL_CALL_PARSER=deepseek_v4
     REASONING_PARSER=deepseek_v4
-    LOAD_FORMAT=safetensors
+    LOAD_FORMAT=instanttensor
     VLLM_API_PORT=8010
     VLLM_MASTER_PORT=29500
     RAY_MIN_WORKER_PORT=20000
     RAY_MAX_WORKER_PORT=29000
-    RAY_OBJECT_STORE_GB=2
+    RAY_OBJECT_STORE_GB=1
     ENFORCE_EAGER=1
-    VLLM_MXFP4_MARLIN_DEEPGEMM_LAYERS=42
-    VLLM_TRITON_MLA_SPARSE_ALLOW_CUDAGRAPH=1
-    RAY_memory_monitor_refresh_ms=0
+    VLLM_EXTRA_ARGS=--disable-custom-all-reduce
+    NCCL_NVLS_ENABLE=0
+    NCCL_SHM_DISABLE=1
+    RAY_memory_usage_threshold=0.995
   "
 
-  # DeepSeek V4 Flash — W4A16-FP8 quant (pastapaul), TP=2
+# DeepSeek V4 Flash — W4A16-FP8 quant (pastapaul), TP=2
   # ~143GB weights, ~71GB/node. More KV headroom than native checkpoint.
   # GB10-validated. Compare quality vs native before committing as daily driver.
   # NOTE: TP>2 blocked by vllm#41511 (W4A16 MoE scale-sharding). TP=2 only.
   # Deploy: ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster deepseek-v4-flash-w4a16
   #         ./vllm_cluster_orchestrator.sh --nodes 3,4 load-model deepseek-v4-flash-w4a16
   [deepseek-v4-flash-w4a16]="
-    DOCKER_IMAGE=vllm-eugr-0.22.0
+    DOCKER_IMAGE=vllm-jasl-ds4
     MODEL_DIR=/mnt/network/data/models/huggingface/hf/pastapaul/DeepSeek-V4-Flash-W4A16-FP8
     SERVED_MODEL_NAME=deepseek-v4-flash-284b-a13b
     TENSOR_PARALLEL_SIZE=2
     MAX_MODEL_LEN=524288
     MAX_NUM_SEQS=2
-    GPU_MEMORY_UTILIZATION=0.85
+    GPU_MEMORY_UTILIZATION=0.15
     ENABLE_PREFIX_CACHING=1
     ENABLE_CHUNKED_PREFILL=1
     KV_CACHE_DTYPE=fp8
@@ -158,12 +159,14 @@ declare -A MODELS=(
     ENABLE_AUTO_TOOL_CHOICE=1
     TOOL_CALL_PARSER=deepseek_v4
     REASONING_PARSER=deepseek_v4
+    LOAD_FORMAT=instanttensor
     VLLM_API_PORT=8000
     VLLM_MASTER_PORT=29500
     RAY_MIN_WORKER_PORT=20000
     RAY_MAX_WORKER_PORT=29000
-    RAY_OBJECT_STORE_GB=2
-    ENFORCE_EAGER=0
+    RAY_OBJECT_STORE_GB=1
+    ENFORCE_EAGER=1
+    VLLM_EXTRA_ARGS=--disable-custom-all-reduce
   "
 
   # =========================================================================
