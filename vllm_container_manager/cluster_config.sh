@@ -38,6 +38,7 @@ declare -A CUSTOM_IMAGES=(
   [vllm-sm121-397b]="192.168.2.42:5000/vllm-sm121-397b:latest"
   [vllm-node]="192.168.2.42:5000/vllm-node:latest"
   [vllm-cluster-universal]="192.168.2.42:5000/vllm-cluster-universal:2026-05-29_b03"
+  [vllm-eugr-0.22.0]="192.168.2.42:5000/vllm-eugr-0.22.0:2026-06-04_b01"
 )
 
 # Images that require a specific entrypoint (NGC-based images need their setup script)
@@ -48,6 +49,7 @@ declare -A IMAGE_ENTRYPOINTS=(
   [vllm-qwen35-v2]="/opt/nvidia/nvidia_entrypoint.sh"
   [vllm-sm121]="/opt/nvidia/nvidia_entrypoint.sh"
   [vllm-sm121-397b]="/opt/nvidia/nvidia_entrypoint.sh"
+  [vllm-eugr-0.22.0]="/opt/nvidia/nvidia_entrypoint.sh"
   [vllm-cluster-universal]="/opt/entrypoint.sh"
 )
 
@@ -78,6 +80,81 @@ declare -A MODELS=(
     VLLM_PORT=8000
     RAY_OBJECT_STORE_GB=2
     ENFORCE_EAGER=0
+  "
+
+  # =========================================================================
+  # DeepSeek V4 Flash (CSA+HCA hybrid attention, 284B total / 13B active)
+  # =========================================================================
+  #
+  # Tool calling: deepseek_v4 parser + tokenizer-mode required.
+  # KNOWN ISSUES (vLLM 0.22.0):
+  #   - #41122/#41240: boolean/typed args returned as quoted strings — breaks
+  #     Cline subagent tool calls. Non-streaming + tool_choice=required is the
+  #     workaround. Do NOT use for Cline until fixed upstream.
+  #   - #40800: streaming + tool_choice=auto leaks DSML fragments intermittently.
+  # STATUS: creative writing / Prosesmith primary. Cline: stay on GLM-4.7.
+  #
+  # KV cache: CSA+HCA extremely compact (~2% of GQA). At fp8 KV, 512k context
+  # needs ~2.5GB/node — headroom is not a constraint at TP=2.
+  # BLOCK_SIZE=256 required by V4 hybrid KV cache manager.
+  # TOKENIZER_MODE=deepseek_v4 required (non-standard tokenizer arch).
+
+  # DeepSeek V4 Flash — native FP4+FP8 mixed checkpoint, TP=2
+  # ~158GB weights, ~79GB/node. Quality baseline — test first.
+  # Deploy: ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster deepseek-v4-flash
+  #         ./vllm_cluster_orchestrator.sh --nodes 3,4 load-model deepseek-v4-flash
+  [deepseek-v4-flash]="
+    DOCKER_IMAGE=vllm-eugr-0.22.0
+    MODEL_DIR=/mnt/network/data/models/huggingface/hf/deepseek-ai/DeepSeek-V4-Flash
+    SERVED_MODEL_NAME=deepseek-v4-flash-284b-a13b
+    TENSOR_PARALLEL_SIZE=2
+    MAX_MODEL_LEN=524288
+    MAX_NUM_SEQS=2
+    GPU_MEMORY_UTILIZATION=0.85
+    ENABLE_PREFIX_CACHING=1
+    ENABLE_CHUNKED_PREFILL=1
+    KV_CACHE_DTYPE=fp8
+    BLOCK_SIZE=256
+    TOKENIZER_MODE=deepseek_v4
+    HF_HUB_OFFLINE=1
+    TRUST_REMOTE_CODE=1
+    ENABLE_AUTO_TOOL_CHOICE=1
+    TOOL_CALL_PARSER=deepseek_v4
+    REASONING_PARSER=deepseek_v4
+    VLLM_PORT=8010
+    RAY_OBJECT_STORE_GB=2
+    ENFORCE_EAGER=0
+	VLLM_MASTER_PORT=29500
+  "
+
+  # DeepSeek V4 Flash — W4A16-FP8 quant (pastapaul), TP=2
+  # ~143GB weights, ~71GB/node. More KV headroom than native checkpoint.
+  # GB10-validated. Compare quality vs native before committing as daily driver.
+  # NOTE: TP>2 blocked by vllm#41511 (W4A16 MoE scale-sharding). TP=2 only.
+  # Deploy: ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster deepseek-v4-flash-w4a16
+  #         ./vllm_cluster_orchestrator.sh --nodes 3,4 load-model deepseek-v4-flash-w4a16
+  [deepseek-v4-flash-w4a16]="
+    DOCKER_IMAGE=vllm-eugr-0.22.0
+    MODEL_DIR=/mnt/network/data/models/huggingface/hf/pastapaul/DeepSeek-V4-Flash-W4A16-FP8
+    SERVED_MODEL_NAME=deepseek-v4-flash-284b-a13b
+    TENSOR_PARALLEL_SIZE=2
+    MAX_MODEL_LEN=524288
+    MAX_NUM_SEQS=2
+    GPU_MEMORY_UTILIZATION=0.85
+    ENABLE_PREFIX_CACHING=1
+    ENABLE_CHUNKED_PREFILL=1
+    KV_CACHE_DTYPE=fp8
+    BLOCK_SIZE=256
+    TOKENIZER_MODE=deepseek_v4
+    HF_HUB_OFFLINE=1
+    TRUST_REMOTE_CODE=1
+    ENABLE_AUTO_TOOL_CHOICE=1
+    TOOL_CALL_PARSER=deepseek_v4
+    REASONING_PARSER=deepseek_v4
+    VLLM_PORT=8000
+    RAY_OBJECT_STORE_GB=2
+    ENFORCE_EAGER=0
+	VLLM_MASTER_PORT=29500
   "
 
   # =========================================================================

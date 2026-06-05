@@ -35,7 +35,18 @@ RAY_TEMP_DIR="${RAY_TEMP_DIR:-/tmp/ray}"
 THIS_NODE="${THIS_NODE:-1}"
 RAY_HEAD_IP="${RAY_HEAD_IP:-}"
 RAY_NODE_IP="${RAY_NODE_IP:-}"
-RAY_PORT="${RAY_PORT:-6379}"
+RAY_PORT="${RAY_PORT:-6379}"            # Ray GCS port (head node)
+RAY_DASHBOARD_PORT="${RAY_DASHBOARD_PORT:-8265}"  # Ray dashboard port (head node)
+
+# Ray worker/internal port ranges — keep well away from VLLM_PORT and VLLM_MASTER_PORT.
+# Ray will pick ports in [RAY_MIN_WORKER_PORT, RAY_MAX_WORKER_PORT] for worker processes.
+# Defaults: 20000-29000 (avoids clash with vLLM's 29500 range).
+RAY_MIN_WORKER_PORT="${RAY_MIN_WORKER_PORT:-20000}"
+RAY_MAX_WORKER_PORT="${RAY_MAX_WORKER_PORT:-29000}"
+
+# Ray node manager / object manager ports (one per node, must be unique across nodes)
+RAY_NODE_MANAGER_PORT="${RAY_NODE_MANAGER_PORT:-}"   # Empty = Ray auto-assigns
+RAY_OBJECT_MANAGER_PORT="${RAY_OBJECT_MANAGER_PORT:-}"  # Empty = Ray auto-assigns
 
 # ==============================================================================
 # State and Logging
@@ -102,6 +113,19 @@ fi
 # Miscellaneous
 # ==============================================================================
 VLLM_EXTRA_ARGS="${VLLM_EXTRA_ARGS:-}"
+TOKENIZER_MODE="${TOKENIZER_MODE:-}"
+BLOCK_SIZE="${BLOCK_SIZE:-}"
+HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-0}"
+
+# vLLM distributed rendezvous port — used by PyTorch/NCCL for inter-node coordination.
+# MUST be different from VLLM_PORT and must not collide with Ray ports.
+# eugr uses 29501; we default to 29500 (leaves 29501+ free for multiple concurrent instances).
+# If running two TP=2 instances simultaneously, set each to a different VLLM_MASTER_PORT.
+VLLM_MASTER_PORT="${VLLM_MASTER_PORT:-29500}"
+
+# Base port for vLLM worker subprocess communication (Ray actor RPC).
+# Empty = vLLM auto-assigns. Set explicitly if you need deterministic port assignment.
+VLLM_WORKER_PORT_BASE="${VLLM_WORKER_PORT_BASE:-}"
 SPECULATIVE_METHOD="${SPECULATIVE_METHOD:-}"
 SPECULATIVE_NUM_TOKENS="${SPECULATIVE_NUM_TOKENS:-}"
 NUM_SPECULATIVE_TOKENS="${NUM_SPECULATIVE_TOKENS:-}"
@@ -147,7 +171,7 @@ RemovePIDFile() {
 
 RunCMD() {
   if [[ -n "${RUN_USER}" ]] && [[ "$(id -un)" != "${RUN_USER}" ]]; then
-    sudo -u "${RUN_USER}" -H --preserve-env=RAY_ADDRESS,RAY_NODE_IP,VLLM_HOST_IP,NCCL_SOCKET_IFNAME,NCCL_IB_HCA,NCCL_DEBUG,GLOO_SOCKET_IFNAME,UCX_NET_DEVICES,CUDA_HOME,PATH,LD_LIBRARY_PATH,QUANTIZATION,DTYPE,ENABLE_PREFIX_CACHING,ENABLE_CHUNKED_PREFILL,KV_CACHE_DTYPE,AUTO_AWQ_MARLIN,LOAD_FORMAT,COMPILATION_CONFIG -- "$@"
+    sudo -u "${RUN_USER}" -H --preserve-env=RAY_ADDRESS,RAY_NODE_IP,VLLM_HOST_IP,NCCL_SOCKET_IFNAME,NCCL_IB_HCA,NCCL_DEBUG,GLOO_SOCKET_IFNAME,UCX_NET_DEVICES,CUDA_HOME,PATH,LD_LIBRARY_PATH,QUANTIZATION,DTYPE,ENABLE_PREFIX_CACHING,ENABLE_CHUNKED_PREFILL,KV_CACHE_DTYPE,AUTO_AWQ_MARLIN,LOAD_FORMAT,COMPILATION_CONFIG,TOKENIZER_MODE,BLOCK_SIZE,HF_HUB_OFFLINE,VLLM_MASTER_PORT,VLLM_WORKER_PORT_BASE -- "$@"
   else
     "$@"
   fi
@@ -224,17 +248,24 @@ StartRayHead() {
   
   StopRayHard
   
-  RunCMD "${RAY_BIN}" start --head \
-    --node-ip-address="${RAY_NODE_IP}" \
-    --port="${RAY_PORT}" \
-    --dashboard-host=0.0.0.0 \
-    --dashboard-port=8265 \
-    --object-store-memory="${RAY_OBJECT_STORE_BYTES}" \
-    --temp-dir="${RAY_TEMP_DIR}" \
-    --num-cpus=0 \
-    >>"${RAY_LOGFILE}" 2>&1
+  local ray_args=(
+    "${RAY_BIN}" start --head
+    --node-ip-address="${RAY_NODE_IP}"
+    --port="${RAY_PORT}"
+    --dashboard-host=0.0.0.0
+    --dashboard-port="${RAY_DASHBOARD_PORT}"
+    --min-worker-port="${RAY_MIN_WORKER_PORT}"
+    --max-worker-port="${RAY_MAX_WORKER_PORT}"
+    --object-store-memory="${RAY_OBJECT_STORE_BYTES}"
+    --temp-dir="${RAY_TEMP_DIR}"
+    --num-cpus=0
+  )
+  [[ -n "${RAY_NODE_MANAGER_PORT}" ]] && ray_args+=(--node-manager-port="${RAY_NODE_MANAGER_PORT}")
+  [[ -n "${RAY_OBJECT_MANAGER_PORT}" ]] && ray_args+=(--object-manager-port="${RAY_OBJECT_MANAGER_PORT}")
+
+  RunCMD "${ray_args[@]}" >>"${RAY_LOGFILE}" 2>&1
   
-  Log "Ray head started (dashboard: http://${RAY_NODE_IP}:8265)"
+  Log "Ray head started (dashboard: http://${RAY_NODE_IP}:${RAY_DASHBOARD_PORT})"
 }
 
 StartRayWorker() {
@@ -270,6 +301,13 @@ BuildVLLMArgs() {
   )
   # Ray executor only needed for multi-node TP; TP=1 uses multiproc (faster, no Ray overhead)
   [[ "${TENSOR_PARALLEL_SIZE}" -gt 1 ]] && args+=(--distributed-executor-backend ray)
+
+  # Explicit rendezvous port — decouples NCCL/PyTorch distributed init from VLLM_PORT.
+  # Without this, vLLM defaults to VLLM_PORT+1 which collides with other services.
+  [[ -n "${VLLM_MASTER_PORT}" ]] && args+=(--master-port "${VLLM_MASTER_PORT}")
+
+  # Worker port base — set for deterministic Ray actor RPC port assignment.
+  [[ -n "${VLLM_WORKER_PORT_BASE}" ]] && args+=(--worker-port-base "${VLLM_WORKER_PORT_BASE}")
   
   # Split comma-separated model names into separate flags
   IFS=',' read -ra model_names <<< "${SERVED_MODEL_NAME}"
@@ -287,6 +325,8 @@ BuildVLLMArgs() {
   [[ "${ENABLE_AUTO_TOOL_CHOICE}" == "1" ]] && args+=(--enable-auto-tool-choice)
   [[ -n "${TOOL_CALL_PARSER}" ]] && args+=(--tool-call-parser "${TOOL_CALL_PARSER}")
   [[ -n "${REASONING_PARSER}" ]] && args+=(--reasoning-parser "${REASONING_PARSER}")
+  [[ -n "${TOKENIZER_MODE}" ]] && args+=(--tokenizer-mode "${TOKENIZER_MODE}")
+  [[ -n "${BLOCK_SIZE}" ]] && args+=(--block-size "${BLOCK_SIZE}")
   
   # Auto AWQ detection
   if [[ -z "${QUANTIZATION}" ]] && [[ "${AUTO_AWQ_MARLIN}" == "1" ]]; then
@@ -484,6 +524,12 @@ Environment (cluster):
   THIS_NODE=<1|2|3|4>        Node number (1=head, 2-4=workers)
   RAY_HEAD_IP=<ip>           Head node fabric IP (e.g. 10.10.10.1)
   RAY_NODE_IP=<ip>           This node's fabric IP (auto-detected if unset)
+  RAY_PORT=<port>            Ray GCS port (default: 6379)
+  RAY_DASHBOARD_PORT=<port>  Ray dashboard port (default: 8265)
+  RAY_MIN_WORKER_PORT=<port> Ray worker port range lower bound (default: 20000)
+  RAY_MAX_WORKER_PORT=<port> Ray worker port range upper bound (default: 29000)
+  RAY_NODE_MANAGER_PORT=<p>  Ray node manager port (default: auto)
+  RAY_OBJECT_MANAGER_PORT=<p> Ray object manager port (default: auto)
 
 Environment (model):
   MODEL_DIR=<path>           Model directory (default: /opt/ai-models/hf/CHANGE_ME)
@@ -493,6 +539,10 @@ Environment (model):
   MAX_MODEL_LEN=<tokens>     Context length
   GPU_MEMORY_UTILIZATION=<f> Fraction (default: 0.92)
   VLLM_PORT=<port>           API port (default: 8000)
+  VLLM_MASTER_PORT=<port>    PyTorch/NCCL distributed rendezvous port (default: 29500)
+                             MUST differ from VLLM_PORT and Ray ports.
+                             If running two TP>1 instances, give each a unique value.
+  VLLM_WORKER_PORT_BASE=<p>  Base port for vLLM Ray actor RPC (default: auto)
 
 Examples:
   # Node 1 (head) - start Ray
