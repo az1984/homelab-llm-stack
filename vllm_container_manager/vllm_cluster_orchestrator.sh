@@ -184,6 +184,10 @@ cmd_start_cluster() {
   fi
   
   Log "=== Starting ${num_nodes}-node cluster ==="
+
+  # Always stop first — guarantees Ray is dead and no stale actor handles.
+  Log "Ensuring clean state (stop-cluster before start)..."
+  cmd_stop_cluster
   
   # Determine head node (first active node or node 1)
   local head_node=1
@@ -271,6 +275,20 @@ cmd_load_model() {
     Log "Starting Ray cluster (${tp_size} nodes, ${ray_store_gb}GB object store per node)"
     export RAY_OBJECT_STORE_GB="${ray_store_gb}"
 
+    # Drop page cache on all nodes before loading — NFS weight loading fills
+    # the kernel page cache aggressively; clearing it before init prevents
+    # RAM exhaustion during the Marlin weight prep phase.
+    Log "Dropping page cache on all nodes before model load..."
+    for node_num in "${nodes_to_use[@]}"; do
+      local node_ip_i=$(get_node_info $node_num lan_ip)
+      local node_name=$(get_node_info $node_num name)
+      (
+        ssh admin@${node_ip_i} "sync && echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null && echo '[${node_name}] page cache dropped'" 
+      ) &
+    done
+    wait
+    Log "Page cache drop complete"
+
     # Start Ray on selected nodes (in parallel)
     for node_num in "${nodes_to_use[@]}"; do
       local node_name=$(get_node_info $node_num name)
@@ -291,8 +309,24 @@ cmd_load_model() {
     # Wait for all Ray processes to finish starting
     wait
 
-    Log "Waiting for Ray to stabilize (5s)"
-    sleep 5
+    Log "Waiting for Ray to stabilize..."
+    local ray_wait=0
+    local ray_max=30
+    while [[ $ray_wait -lt $ray_max ]]; do
+      sleep 2
+      ray_wait=$((ray_wait + 2))
+      local ray_ok
+      ray_ok=$(ssh admin@${node_ip} \
+        "sudo docker exec vllm-node-${head_node} ray status 2>/dev/null | grep -c 'Active' || true")
+      if [[ "${ray_ok:-0}" -gt 0 ]]; then
+        Log "  Ray ready after ${ray_wait}s"
+        break
+      fi
+      Log "  Waiting for Ray... (${ray_wait}s)"
+    done
+    if [[ $ray_wait -ge $ray_max ]]; then
+      Log "  WARNING: Ray status check timed out — proceeding anyway"
+    fi
   else
     Log "TP=1: skipping Ray — using multiproc executor"
   fi
@@ -310,7 +344,7 @@ cmd_load_model() {
   ssh admin@${node_ip} "sudo docker exec ${env_args} vllm-node-${head_node} /opt/vllm_cluster.sh load-model"
   
   # Post-launch verification: poll for signs of life
-  local vllm_port=$(echo "$model_config" | grep VLLM_PORT | cut -d'=' -f2 | xargs)
+  local vllm_port=$(echo "$model_config" | grep "VLLM_API_PORT\|VLLM_PORT" | head -1 | cut -d'=' -f2 | xargs)
   vllm_port="${vllm_port:-8000}"
   local served_name=$(echo "$model_config" | grep SERVED_MODEL_NAME | cut -d'=' -f2 | xargs)
   
@@ -415,24 +449,40 @@ cmd_status() {
 }
 
 cmd_stop_cluster() {
+  local nodes_to_stop=()
   if [[ ${#ACTIVE_NODES[@]} -gt 0 ]]; then
     Log "Stopping nodes: ${ACTIVE_NODES[*]}"
-    for node in "${ACTIVE_NODES[@]}"; do
-      local ip=$(get_node_info $node lan_ip)
-      ssh admin@${ip} "sudo docker rm -f vllm-node-${node} 2>/dev/null || true" &
-    done
+    nodes_to_stop=("${ACTIVE_NODES[@]}")
   else
     Log "Stopping all nodes"
-    for i in 1 2 3 4; do
-      local ip=$(get_node_info $i lan_ip)
-      ssh admin@${ip} "sudo docker rm -f vllm-node-${i} 2>/dev/null || true" &
-    done
+    nodes_to_stop=(1 2 3 4)
   fi
+
+  # Phase 1: gracefully stop Ray + vLLM inside each container
+  Log "Phase 1: stopping Ray/vLLM inside containers..."
+  for node in "${nodes_to_stop[@]}"; do
+    local ip=$(get_node_info $node lan_ip)
+    (
+      ssh admin@${ip} \
+        "sudo docker exec vllm-node-${node} /opt/vllm_cluster.sh stop-all 2>/dev/null || true" \
+        2>/dev/null || true
+    ) &
+  done
   wait
+  Log "  Ray/vLLM stop complete (or containers already gone)"
+
+  # Phase 2: remove containers
+  Log "Phase 2: removing containers..."
+  for node in "${nodes_to_stop[@]}"; do
+    local ip=$(get_node_info $node lan_ip)
+    ssh admin@${ip} "sudo docker rm -f vllm-node-${node} 2>/dev/null || true" &
+  done
+  wait
+  Log "Cluster stopped."
 }
 
 # Known vLLM API ports to probe
-VLLM_PROBE_PORTS=(8000 8001 8002)
+VLLM_PROBE_PORTS=(8000 8001 8002 8010)
 
 cmd_details() {
   Log "=== Cluster Details (probing API endpoints) ==="

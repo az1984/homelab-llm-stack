@@ -122,7 +122,7 @@ declare -A MODELS=(
     ENABLE_AUTO_TOOL_CHOICE=1
     TOOL_CALL_PARSER=deepseek_v4
     REASONING_PARSER=deepseek_v4
-	LOAD_FORMAT=instanttensor
+    LOAD_FORMAT=safetensors
     VLLM_API_PORT=8010
     VLLM_MASTER_PORT=29500
     RAY_MIN_WORKER_PORT=20000
@@ -131,7 +131,7 @@ declare -A MODELS=(
     ENFORCE_EAGER=1
     VLLM_MXFP4_MARLIN_DEEPGEMM_LAYERS=42
     VLLM_TRITON_MLA_SPARSE_ALLOW_CUDAGRAPH=1
-	RAY_memory_monitor_refresh_ms=0
+    RAY_memory_monitor_refresh_ms=0
   "
 
   # DeepSeek V4 Flash — W4A16-FP8 quant (pastapaul), TP=2
