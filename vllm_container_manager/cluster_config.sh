@@ -108,10 +108,10 @@ declare -A MODELS=(
     DOCKER_IMAGE=vllm-jasl-ds4
     MODEL_DIR=/mnt/network/data/models/huggingface/hf/deepseek-ai/DeepSeek-V4-Flash
     SERVED_MODEL_NAME=deepseek-v4-flash-284b-a13b
-    TENSOR_PARALLEL_SIZE=3
-    MAX_MODEL_LEN=524288
-    MAX_NUM_SEQS=3
-    GPU_MEMORY_UTILIZATION=0.15
+    TENSOR_PARALLEL_SIZE=4
+    MAX_MODEL_LEN=655360
+    MAX_NUM_SEQS=2
+    GPU_MEMORY_UTILIZATION=0.50
     ENABLE_PREFIX_CACHING=1
     ENABLE_CHUNKED_PREFILL=1
     KV_CACHE_DTYPE=fp8
@@ -128,10 +128,47 @@ declare -A MODELS=(
     RAY_MIN_WORKER_PORT=20000
     RAY_MAX_WORKER_PORT=29000
     RAY_OBJECT_STORE_GB=1
-    ENFORCE_EAGER=1
+    ENFORCE_EAGER=0
+    DTYPE=bfloat16
     VLLM_EXTRA_ARGS=--disable-custom-all-reduce
     NCCL_NVLS_ENABLE=0
     NCCL_SHM_DISABLE=1
+  "
+
+  # DeepSeek V4 Flash — native FP4+FP8 mixed checkpoint, TP=2
+  # ~158GB weights, ~79GB/node. Quality baseline — test first.
+  # Deploy: ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster deepseek-v4-flash
+  #         ./vllm_cluster_orchestrator.sh --nodes 3,4 load-model deepseek-v4-flash
+  [deepseek-v4-flash-dev]="
+    DOCKER_IMAGE=vllm-jasl-ds4
+    MODEL_DIR=/mnt/network/data/models/huggingface/hf/deepseek-ai/DeepSeek-V4-Flash
+    SERVED_MODEL_NAME=deepseek-v4-flash-284b-a13b
+    TENSOR_PARALLEL_SIZE=4
+    MAX_MODEL_LEN=655360
+    MAX_NUM_SEQS=2
+    GPU_MEMORY_UTILIZATION=0.50
+    ENABLE_PREFIX_CACHING=1
+    ENABLE_CHUNKED_PREFILL=1
+    KV_CACHE_DTYPE=fp8
+    BLOCK_SIZE=256
+    TOKENIZER_MODE=deepseek_v4
+    HF_HUB_OFFLINE=1
+    TRUST_REMOTE_CODE=1
+    ENABLE_AUTO_TOOL_CHOICE=1
+    TOOL_CALL_PARSER=deepseek_v4
+    REASONING_PARSER=deepseek_v4
+    LOAD_FORMAT=instanttensor
+    VLLM_API_PORT=8010
+    VLLM_MASTER_PORT=29500
+    RAY_MIN_WORKER_PORT=20000
+    RAY_MAX_WORKER_PORT=29000
+    RAY_OBJECT_STORE_GB=1
+    ENFORCE_EAGER=0
+    DTYPE=bfloat16
+    VLLM_EXTRA_ARGS=--disable-custom-all-reduce
+    NCCL_SHM_DISABLE=1
+    SPECULATIVE_METHOD=mtp
+    SPECULATIVE_NUM_TOKENS=1
   "
 
 # DeepSeek V4 Flash — W4A16-FP8 quant (pastapaul), TP=2

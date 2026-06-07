@@ -109,6 +109,7 @@ ensure_container() {
     --ipc=host \
     --ulimit memlock=-1 \
     --ulimit stack=67108864 \
+    --ulimit nofile=1048576:1048576 \
     --network host \
     --shm-size=10g \
     -e THIS_NODE=${node_num} \
@@ -340,18 +341,39 @@ cmd_load_model() {
     [[ -n "$key" && -n "$value" ]] && env_args="${env_args} -e ${key}=$(printf '%q' "${value}")"
   done <<< "${model_config}"
   
+  # Extract served name and port for log file paths and health checks
+  local served_name=$(echo "$model_config" | grep SERVED_MODEL_NAME | cut -d'=' -f2 | xargs)
+  local vllm_port=$(echo "$model_config" | grep "VLLM_API_PORT\|VLLM_PORT" | head -1 | cut -d'=' -f2 | xargs)
+  vllm_port="${vllm_port:-8000}"
+  local log_file="/opt/ai-tools/logs/vllm-cluster/vllm_${served_name}_node${head_node}_latest.log"
+
+  # Truncate any stale log from previous runs of this model — prevents false
+  # error detection from matching errors left by prior failed attempts.
+  ssh admin@${node_ip} "sudo docker exec vllm-node-${head_node} truncate -s 0 ${log_file} 2>/dev/null || true"
+
   Log "Loading model on head node ${head_node}..."
   ssh admin@${node_ip} "sudo docker exec ${env_args} vllm-node-${head_node} /opt/vllm_cluster.sh load-model"
   
   # Post-launch verification: poll for signs of life
-  local vllm_port=$(echo "$model_config" | grep "VLLM_API_PORT\|VLLM_PORT" | head -1 | cut -d'=' -f2 | xargs)
-  vllm_port="${vllm_port:-8000}"
-  local served_name=$(echo "$model_config" | grep SERVED_MODEL_NAME | cut -d'=' -f2 | xargs)
   
   Log "Waiting for vLLM to initialize..."
   local max_wait=900  # 15 minutes max (NFS weight loading + CUDA graph compilation)
   local elapsed=0
   local stage="starting"
+  local cache_drop_20_35_done=false
+  local cache_drop_45_60_done=false
+  local cache_drop_80_100_done=false
+
+  # Helper: drop page cache on all nodes in parallel
+  drop_page_cache_all_nodes() {
+    local reason="$1"
+    Log "  Dropping page cache on all nodes (${reason})..."
+    for n in "${nodes_to_use[@]}"; do
+      local nip=$(get_node_info $n lan_ip)
+      (ssh admin@${nip} "sync && echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null && echo '[node${n}] cache dropped'" 2>/dev/null || true) &
+    done
+    wait
+  }
   
   while [[ $elapsed -lt $max_wait ]]; do
     sleep 10
@@ -362,16 +384,16 @@ cmd_load_model() {
     proc_check=$(ssh admin@${node_ip} "sudo docker exec vllm-node-${head_node} cat /opt/ai-tools/run/vllm-cluster/vllm_api.pid 2>/dev/null" || true)
     if [[ -z "$proc_check" ]]; then
       Log "  [${elapsed}s] WARNING: No PID file found — load-model may have failed"
-      Log "  Check: ssh admin@${node_ip} 'tail -30 /opt/ai-tools/logs/vllm-cluster/vllm_*_latest.log'"
+      Log "  Check: ssh admin@${node_ip} 'tail -30 ${log_file}'"
       return 1
     fi
     
     # Check for fatal errors in log
     local errors
-    errors=$(ssh admin@${node_ip} "sudo docker exec vllm-node-${head_node} grep -c 'EngineCore failed\|RuntimeError\|FATAL' /opt/ai-tools/logs/vllm-cluster/vllm_*_latest.log 2>/dev/null | awk -F: '{s+=\$NF} END{print s+0}'" || echo "0")
+    errors=$(ssh admin@${node_ip} "sudo docker exec vllm-node-${head_node} grep -c 'EngineCore failed to start' ${log_file} 2>/dev/null" || echo "0")
     if [[ "$errors" -gt 0 ]]; then
       Log "  [${elapsed}s] FAILED: Errors detected in log"
-      Log "  Check: ssh admin@${node_ip} 'grep -A5 \"Error\\|RuntimeError\" /opt/ai-tools/logs/vllm-cluster/vllm_*_latest.log | tail -20'"
+      Log "  Check: ssh admin@${node_ip} 'grep -A5 \"EngineCore failed\" ${log_file} | tail -20'"
       return 1
     fi
     
@@ -392,10 +414,25 @@ cmd_load_model() {
     
     # Detect stage from log
     local log_tail
-    log_tail=$(ssh admin@${node_ip} "sudo docker exec vllm-node-${head_node} tail -3 /opt/ai-tools/logs/vllm-cluster/vllm_*_latest.log 2>/dev/null" || true)
+    log_tail=$(ssh admin@${node_ip} "sudo docker exec vllm-node-${head_node} tail -3 ${log_file} 2>/dev/null" || true)
     
     if echo "$log_tail" | grep -q "Loading safetensors"; then
       stage="loading weights"
+      # Extract completion percentage and drop cache at three windows
+      local pct
+      pct=$(echo "$log_tail" | grep -o '[0-9]\+%' | tail -1 | tr -d '%' || echo "0")
+      if [[ -n "$pct" && "$pct" =~ ^[0-9]+$ ]]; then
+        if [[ "$pct" -ge 20 && "$pct" -le 35 && "$cache_drop_20_35_done" == false ]]; then
+          cache_drop_20_35_done=true
+          drop_page_cache_all_nodes "${pct}% loaded"
+        elif [[ "$pct" -ge 45 && "$pct" -le 60 && "$cache_drop_45_60_done" == false ]]; then
+          cache_drop_45_60_done=true
+          drop_page_cache_all_nodes "${pct}% loaded"
+        elif [[ "$pct" -ge 80 && "$cache_drop_80_100_done" == false ]]; then
+          cache_drop_80_100_done=true
+          drop_page_cache_all_nodes "${pct}% loaded"
+        fi
+      fi
     elif echo "$log_tail" | grep -q "torch.compile\|compile"; then
       stage="compiling"
     elif echo "$log_tail" | grep -q "CUDA graph\|Graph capturing"; then
@@ -408,7 +445,7 @@ cmd_load_model() {
   done
   
   Log "  [${elapsed}s] TIMEOUT — vLLM did not become ready in ${max_wait}s"
-  Log "  Check: ssh admin@${node_ip} 'tail -50 /opt/ai-tools/logs/vllm-cluster/vllm_*_latest.log'"
+  Log "  Check: ssh admin@${node_ip} 'tail -50 ${log_file}'"
   return 1
 }
 
