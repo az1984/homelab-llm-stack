@@ -128,6 +128,7 @@ ensure_container() {
     -v /opt/ai-tools/run:/opt/ai-tools/run \
     -v /opt/ai-tools/cache/triton:/root/.triton/cache \
     -v /opt/ai-tools/cache/tilelang:/root/.tilelang/cache \
+    -v /opt/ai-tools/cache/nv-compute:/root/.nv/ComputeCache \
     -v /tmp/vllm_cluster_mgr.sh:/opt/vllm_cluster.sh:ro \
     ${entrypoint_args} \
     ${image_path} \
