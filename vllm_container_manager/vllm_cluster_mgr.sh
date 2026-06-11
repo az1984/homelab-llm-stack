@@ -133,6 +133,7 @@ VLLM_WORKER_PORT_BASE="${VLLM_WORKER_PORT_BASE:-}"
 SPECULATIVE_METHOD="${SPECULATIVE_METHOD:-}"
 SPECULATIVE_NUM_TOKENS="${SPECULATIVE_NUM_TOKENS:-}"
 NUM_SPECULATIVE_TOKENS="${NUM_SPECULATIVE_TOKENS:-}"
+DISTRIBUTED_EXECUTOR_BACKEND="${DISTRIBUTED_EXECUTOR_BACKEND:-}"
 LOAD_FORMAT="${LOAD_FORMAT:-}"
 COMPILATION_CONFIG="${COMPILATION_CONFIG:-}"
 VLLM_LOGFILE="${VLLM_LOGFILE:-${LOG_DIR}/vllm_${SERVED_MODEL_NAME}_node${THIS_NODE}.log}"
@@ -303,12 +304,23 @@ BuildVLLMArgs() {
     --tensor-parallel-size "${TENSOR_PARALLEL_SIZE}"
     --pipeline-parallel-size "${PIPELINE_PARALLEL_SIZE}"
   )
-  # Ray executor only needed for multi-node TP; TP=1 uses multiproc (faster, no Ray overhead)
-  [[ "${TENSOR_PARALLEL_SIZE}" -gt 1 ]] && args+=(--distributed-executor-backend ray)
+  # Executor backend: default to ray for multi-node TP, mp for TP=1.
+  # Override via DISTRIBUTED_EXECUTOR_BACKEND=mp to use multiprocess (no Ray, no Ray OOM monitor).
+  local _executor_backend="${DISTRIBUTED_EXECUTOR_BACKEND:-}"
+  [[ -z "${_executor_backend}" && "${TENSOR_PARALLEL_SIZE}" -gt 1 ]] && _executor_backend="ray"
+  [[ -n "${_executor_backend}" ]] && args+=(--distributed-executor-backend "${_executor_backend}")
 
   # Explicit rendezvous port — decouples NCCL/PyTorch distributed init from VLLM_PORT.
   # Without this, vLLM defaults to VLLM_PORT+1 which collides with other services.
   [[ -n "${VLLM_MASTER_PORT}" ]] && args+=(--master-port "${VLLM_MASTER_PORT}")
+
+  # mp multi-node flags — only relevant when DISTRIBUTED_EXECUTOR_BACKEND=mp and nnodes>1.
+  # VLLM_NNODES, VLLM_NODE_RANK, VLLM_MASTER_ADDR, and VLLM_HEADLESS are injected
+  # per-node by the orchestrator during mp load-model launches.
+  [[ -n "${VLLM_NNODES:-}" ]] && args+=(--nnodes "${VLLM_NNODES}")
+  [[ -n "${VLLM_NODE_RANK:-}" ]] && args+=(--node-rank "${VLLM_NODE_RANK}")
+  [[ -n "${VLLM_MASTER_ADDR:-}" ]] && args+=(--master-addr "${VLLM_MASTER_ADDR}")
+  [[ "${VLLM_HEADLESS:-0}" == "1" ]] && args+=(--headless)
 
   # Worker port base — set for deterministic Ray actor RPC port assignment.
   [[ -n "${VLLM_WORKER_PORT_BASE}" ]] && args+=(--worker-port-base "${VLLM_WORKER_PORT_BASE}")
@@ -364,7 +376,8 @@ BuildVLLMArgs() {
 }
 
 LoadModel() {
-  IsHeadNode || Die "load-model must run on head node (this=${RAY_NODE_IP}, head=${RAY_HEAD_IP})"
+  # mp headless workers (rank > 0) are not head nodes but still run load-model
+  [[ "${VLLM_HEADLESS:-0}" != "1" ]] && { IsHeadNode || Die "load-model must run on head node (this=${RAY_NODE_IP}, head=${RAY_HEAD_IP})"; }
   
   local old_pid
   old_pid="$(ReadPIDFile "${VLLM_PIDFILE}" || true)"
@@ -404,10 +417,10 @@ LoadModel() {
   Log "  Served as: ${SERVED_MODEL_NAME}"
   Log "  Tensor parallel: ${TENSOR_PARALLEL_SIZE}"
 
-  # TP=1: unset RAY_ADDRESS so vLLM doesn't auto-detect the Ray cluster
-  # and fall back to using the Ray executor instead of multiproc
-  if [[ "${TENSOR_PARALLEL_SIZE}" -le 1 ]]; then
-    Log "  Executor: multiproc (TP=1, Ray disabled)"
+  # TP=1 or mp backend: unset RAY_ADDRESS so vLLM doesn't auto-detect Ray
+  # and fall back to the Ray executor instead of multiproc.
+  if [[ "${TENSOR_PARALLEL_SIZE}" -le 1 || "${DISTRIBUTED_EXECUTOR_BACKEND}" == "mp" ]]; then
+    Log "  Executor: multiproc (Ray disabled)"
     unset RAY_ADDRESS
   fi
 
