@@ -244,21 +244,23 @@ declare -A MODELS=(
     SPECULATIVE_NUM_TOKENS=1
   "
 
-# DeepSeek V4 Flash — W4A16-FP8 (pastapaul/Pasta checkpoint), TP=2, Ray
-  # compressed-tensors quantization — NO Marlin prep spike, clean Ray TP=2 boot.
-  # This is the checkpoint the community TP=2 recipes use. NFS is fine here
-  # since compressed-tensors loading doesn't cause the GB10 page cache OOM
-  # that the native FP4+FP8 checkpoint does (different kernel path entirely).
+# DeepSeek V4 Flash — native FP8, TP=2, mp executor, vllm-pasta image
+  # Uses eugr PR #219 image (vllm-node-dsv4/vllm-pasta) built from jasl/vllm
+  # codex/ds4-sm120-min-enable branch. Native FP8 checkpoint (not Pasta/W4A16).
+  # mp backend bypasses Ray OOM monitor. NFS weight path — no Marlin prep spike
+  # with safetensors load format. Based on community-verified recipe.
   # Deploy: ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster deepseek-v4-flash-w4a16
   #         ./vllm_cluster_orchestrator.sh --nodes 3,4 load-model deepseek-v4-flash-w4a16
   [deepseek-v4-flash-w4a16]="
-    DOCKER_IMAGE=vllm-jasl-ds4
-    MODEL_DIR=/mnt/network/data/models/huggingface/hf/pastapaul/DeepSeek-V4-Flash-W4A16-FP8
+    DOCKER_IMAGE=vllm-pasta
+    MODEL_DIR=/mnt/network/data/models/huggingface/hf/deepseek-ai/DeepSeek-V4-Flash
     SERVED_MODEL_NAME=deepseek-v4-flash-284b-a13b
     TENSOR_PARALLEL_SIZE=2
-    MAX_MODEL_LEN=655360
+    DISTRIBUTED_EXECUTOR_BACKEND=mp
+    MAX_MODEL_LEN=200000
     MAX_NUM_SEQS=2
-    GPU_MEMORY_UTILIZATION=0.70
+    MAX_NUM_BATCHED_TOKENS=4192
+    GPU_MEMORY_UTILIZATION=0.85
     ENABLE_PREFIX_CACHING=1
     ENABLE_CHUNKED_PREFILL=1
     KV_CACHE_DTYPE=fp8
@@ -272,11 +274,17 @@ declare -A MODELS=(
     LOAD_FORMAT=safetensors
     VLLM_API_PORT=8011
     VLLM_MASTER_PORT=29501
-    RAY_MIN_WORKER_PORT=20000
-    RAY_MAX_WORKER_PORT=29000
-    RAY_OBJECT_STORE_GB=1
     ENFORCE_EAGER=0
     DTYPE=bfloat16
+    TORCH_CUDA_ARCH_LIST=12.1a
+    VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
+    VLLM_TRITON_MLA_SPARSE=1
+    FLASHINFER_DISABLE_VERSION_CHECK=1
+    TILELANG_CLEANUP_TEMP_FILES=1
+    DG_JIT_USE_NVRTC=0
+    DG_JIT_NVCC_COMPILER=/usr/local/cuda/bin/nvcc
+    NCCL_IB_DISABLE=0
+    NCCL_DEBUG=WARN
     VLLM_EXTRA_ARGS=--disable-custom-all-reduce
     NCCL_NVLS_ENABLE=0
     NCCL_SHM_DISABLE=1
