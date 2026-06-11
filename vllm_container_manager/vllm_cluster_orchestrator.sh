@@ -252,7 +252,6 @@ cmd_load_model() {
   # Extract settings
   local ray_store_gb=$(echo "$model_config" | grep RAY_OBJECT_STORE_GB | cut -d'=' -f2 | xargs)
   local tp_size=$(echo "$model_config" | grep TENSOR_PARALLEL_SIZE | cut -d'=' -f2 | xargs)
-  local executor_backend=$(echo "$model_config" | grep DISTRIBUTED_EXECUTOR_BACKEND | cut -d'=' -f2 | xargs)
   
   # Validate we have enough active nodes
   if [[ ${#ACTIVE_NODES[@]} -gt 0 ]]; then
@@ -273,10 +272,9 @@ cmd_load_model() {
   fi
   
   Log "Using nodes: ${nodes_to_use[*]}"
-  Log "Executor backend: ${executor_backend:-ray (default)}"
 
-  if [[ "${tp_size}" -gt 1 && "${executor_backend}" != "mp" ]]; then
-    # Ray path: start Ray cluster before loading model
+  # TP=1: skip Ray entirely — single-node uses multiproc executor
+  if [[ "${tp_size}" -gt 1 ]]; then
     Log "Starting Ray cluster (${tp_size} nodes, ${ray_store_gb}GB object store per node)"
     export RAY_OBJECT_STORE_GB="${ray_store_gb}"
 
@@ -332,28 +330,13 @@ cmd_load_model() {
     if [[ $ray_wait -ge $ray_max ]]; then
       Log "  WARNING: Ray status check timed out — proceeding anyway"
     fi
-  elif [[ "${executor_backend}" == "mp" && "${tp_size}" -gt 1 ]]; then
-    Log "mp executor: skipping Ray — launching vLLM on all nodes directly"
-    Log "Dropping page cache on all nodes before model load..."
-    for node_num in "${nodes_to_use[@]}"; do
-      local node_ip_i=$(get_node_info $node_num lan_ip)
-      local node_name=$(get_node_info $node_num name)
-      (
-        ssh admin@${node_ip_i} "sync && echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null && echo '[${node_name}] page cache dropped'"
-      ) &
-    done
-    wait
-    Log "Page cache drop complete"
   else
     Log "TP=1: skipping Ray — using multiproc executor"
   fi
   
   # Build env args for vLLM (profile vars already baked into container,
   # but pass them again on exec for any that might be overridden)
-  # Ray path: inject RAY_HEAD_IP for IsHeadNode detection in mgr.sh
-  # mp path: omit RAY_HEAD_IP — not using Ray; VLLM_MASTER_ADDR is the rendezvous signal
-  local env_args=""
-  [[ "${executor_backend}" != "mp" ]] && env_args="-e RAY_HEAD_IP=${head_fabric_ip}"
+  local env_args="-e RAY_HEAD_IP=${head_fabric_ip}"
   while IFS='=' read -r key value; do
     key=$(echo "$key" | xargs)
     value=$(echo "$value" | xargs)
@@ -370,39 +353,8 @@ cmd_load_model() {
   # error detection from matching errors left by prior failed attempts.
   ssh admin@${node_ip} "sudo docker exec vllm-node-${head_node} truncate -s 0 ${log_file} 2>/dev/null || true"
 
-  if [[ "${executor_backend}" == "mp" && "${tp_size}" -gt 1 ]]; then
-    # mp multi-node: launch vLLM on every node simultaneously.
-    # Each node gets --nnodes, --node-rank, --master-addr.
-    # Worker nodes (rank > 0) also get --headless (no API server).
-    # NOTE: node_rank is computed outside subshells — subshell isolation means
-    # variables incremented inside (...) & are not visible to the parent loop.
-    local nnodes="${tp_size}"
-    Log "Loading model on all nodes (mp, nnodes=${nnodes})..."
-    local _mp_rank=0
-    for node_num in "${nodes_to_use[@]}"; do
-      local node_name=$(get_node_info $node_num name)
-      local node_ip_i=$(get_node_info $node_num lan_ip)
-      local headless_flag=0
-      [[ $_mp_rank -gt 0 ]] && headless_flag=1
-      local this_rank=$_mp_rank
-      Log "  Node ${node_num} (${node_name}) rank=${this_rank} headless=${headless_flag}"
-      (
-        ssh admin@${node_ip_i} "sudo docker exec \
-          ${env_args} \
-          -e VLLM_NNODES=${nnodes} \
-          -e VLLM_NODE_RANK=${this_rank} \
-          -e VLLM_MASTER_ADDR=${head_fabric_ip} \
-          -e VLLM_HEADLESS=${headless_flag} \
-          vllm-node-${node_num} /opt/vllm_cluster.sh load-model"
-      ) &
-      _mp_rank=$((_mp_rank + 1))
-    done
-    # Don't wait — all nodes block until rendezvous; poll head for readiness below
-  else
-    Log "Loading model on head node ${head_node}..."
-    ssh admin@${node_ip} "sudo docker exec ${env_args} vllm-node-${head_node} /opt/vllm_cluster.sh load-model"
-  fi
-
+  Log "Loading model on head node ${head_node}..."
+  ssh admin@${node_ip} "sudo docker exec ${env_args} vllm-node-${head_node} /opt/vllm_cluster.sh load-model"
   
   # Post-launch verification: poll for signs of life
   
@@ -410,11 +362,9 @@ cmd_load_model() {
   local max_wait=900  # 15 minutes max (NFS weight loading + CUDA graph compilation)
   local elapsed=0
   local stage="starting"
-  local cache_drop_15_25_done=false
-  local cache_drop_35_45_done=false
-  local cache_drop_55_65_done=false
-  local cache_drop_75_85_done=false
-  local cache_drop_90_done=false
+  local cache_drop_20_35_done=false
+  local cache_drop_45_60_done=false
+  local cache_drop_80_100_done=false
 
   # Helper: drop page cache on all nodes in parallel
   drop_page_cache_all_nodes() {
@@ -443,7 +393,6 @@ cmd_load_model() {
     # Check for fatal errors in log
     local errors
     errors=$(ssh admin@${node_ip} "sudo docker exec vllm-node-${head_node} grep -c 'EngineCore failed to start' ${log_file} 2>/dev/null" || echo "0")
-    errors=$(echo "$errors" | tr -d '\n')
     if [[ "$errors" -gt 0 ]]; then
       Log "  [${elapsed}s] FAILED: Errors detected in log"
       Log "  Check: ssh admin@${node_ip} 'grep -A5 \"EngineCore failed\" ${log_file} | tail -20'"
@@ -471,24 +420,18 @@ cmd_load_model() {
     
     if echo "$log_tail" | grep -q "Loading safetensors"; then
       stage="loading weights"
-      # Extract completion percentage and drop cache at five windows (tighter spacing for TP=2 heavier per-node load)
+      # Extract completion percentage and drop cache at three windows
       local pct
-      pct=$(echo "$log_tail" | grep -o '[0-9]\+%' | tail -1 | tr -d '%\n' || echo "0")
+      pct=$(echo "$log_tail" | grep -o '[0-9]\+%' | tail -1 | tr -d '%' || echo "0")
       if [[ -n "$pct" && "$pct" =~ ^[0-9]+$ ]]; then
-        if [[ "$pct" -ge 15 && "$pct" -le 25 && "$cache_drop_15_25_done" == false ]]; then
-          cache_drop_15_25_done=true
+        if [[ "$pct" -ge 20 && "$pct" -le 35 && "$cache_drop_20_35_done" == false ]]; then
+          cache_drop_20_35_done=true
           drop_page_cache_all_nodes "${pct}% loaded"
-        elif [[ "$pct" -ge 35 && "$pct" -le 45 && "$cache_drop_35_45_done" == false ]]; then
-          cache_drop_35_45_done=true
+        elif [[ "$pct" -ge 45 && "$pct" -le 60 && "$cache_drop_45_60_done" == false ]]; then
+          cache_drop_45_60_done=true
           drop_page_cache_all_nodes "${pct}% loaded"
-        elif [[ "$pct" -ge 55 && "$pct" -le 65 && "$cache_drop_55_65_done" == false ]]; then
-          cache_drop_55_65_done=true
-          drop_page_cache_all_nodes "${pct}% loaded"
-        elif [[ "$pct" -ge 75 && "$pct" -le 85 && "$cache_drop_75_85_done" == false ]]; then
-          cache_drop_75_85_done=true
-          drop_page_cache_all_nodes "${pct}% loaded"
-        elif [[ "$pct" -ge 90 && "$cache_drop_90_done" == false ]]; then
-          cache_drop_90_done=true
+        elif [[ "$pct" -ge 80 && "$cache_drop_80_100_done" == false ]]; then
+          cache_drop_80_100_done=true
           drop_page_cache_all_nodes "${pct}% loaded"
         fi
       fi
