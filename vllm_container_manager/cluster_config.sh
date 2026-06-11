@@ -135,6 +135,79 @@ declare -A MODELS=(
     NCCL_SHM_DISABLE=1
   "
 
+# DeepSeek V4 Flash — native FP4+FP8, TP=2 experiment
+  # ~158GB weights, ~79GB/node at TP=2. Tests whether progressive cache flushes
+  # give enough headroom to absorb the Marlin prep spike (~20GB transient).
+  # If this boots: cables + TP=2 as daily driver. If OOM: stay on TP=4.
+  # Deploy: ./vllm_cluster_orchestrator.sh --nodes 1,2 start-cluster deepseek-v4-flash-tp2
+  #         ./vllm_cluster_orchestrator.sh --nodes 1,2 load-model deepseek-v4-flash-tp2
+  [deepseek-v4-flash-tp2]="
+    DOCKER_IMAGE=vllm-jasl-ds4
+    MODEL_DIR=/mnt/network/data/models/huggingface/hf/deepseek-ai/DeepSeek-V4-Flash
+    SERVED_MODEL_NAME=deepseek-v4-flash-284b-a13b
+    TENSOR_PARALLEL_SIZE=2
+    MAX_MODEL_LEN=819200
+    MAX_NUM_SEQS=3
+    GPU_MEMORY_UTILIZATION=0.70
+    ENABLE_PREFIX_CACHING=1
+    ENABLE_CHUNKED_PREFILL=1
+    KV_CACHE_DTYPE=fp8
+    BLOCK_SIZE=256
+    TOKENIZER_MODE=deepseek_v4
+    HF_HUB_OFFLINE=1
+    TRUST_REMOTE_CODE=1
+    ENABLE_AUTO_TOOL_CHOICE=1
+    TOOL_CALL_PARSER=deepseek_v4
+    REASONING_PARSER=deepseek_v4
+    LOAD_FORMAT=instanttensor
+    VLLM_API_PORT=8011
+    VLLM_MASTER_PORT=29501
+    RAY_MIN_WORKER_PORT=20000
+    RAY_MAX_WORKER_PORT=29000
+    RAY_OBJECT_STORE_GB=1
+    ENFORCE_EAGER=0
+    DTYPE=bfloat16
+    VLLM_EXTRA_ARGS=--disable-custom-all-reduce
+    NCCL_NVLS_ENABLE=0
+    NCCL_SHM_DISABLE=1
+  "
+
+  # DeepSeek V4 Flash — local SSD, TP=2, mp executor (no Ray), silicon+phosphorus
+  # Weights at /opt/ai-models/hf to eliminate NFS page cache pressure during Marlin prep.
+  # DISTRIBUTED_EXECUTOR_BACKEND=mp bypasses Ray OOM monitor (the TP=2 boot killer).
+  # Same context as TP=4 baseline to start; tune after boot confirmed.
+  # MTP to be added once concurrency is validated.
+  # Deploy: ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster deepseek-v4-flash-tp2-local
+  #         ./vllm_cluster_orchestrator.sh --nodes 3,4 load-model deepseek-v4-flash-tp2-local
+  [deepseek-v4-flash-tp2-local]="
+    DOCKER_IMAGE=vllm-jasl-ds4
+    MODEL_DIR=/opt/ai-models/hf/deepseek-ai/DeepSeek-V4-Flash
+    SERVED_MODEL_NAME=deepseek-v4-flash-284b-a13b
+    TENSOR_PARALLEL_SIZE=2
+    DISTRIBUTED_EXECUTOR_BACKEND=mp
+    MAX_MODEL_LEN=655360
+    MAX_NUM_SEQS=2
+    GPU_MEMORY_UTILIZATION=0.70
+    ENABLE_PREFIX_CACHING=1
+    ENABLE_CHUNKED_PREFILL=1
+    KV_CACHE_DTYPE=fp8
+    BLOCK_SIZE=256
+    TOKENIZER_MODE=deepseek_v4
+    HF_HUB_OFFLINE=1
+    TRUST_REMOTE_CODE=1
+    ENABLE_AUTO_TOOL_CHOICE=1
+    TOOL_CALL_PARSER=deepseek_v4
+    REASONING_PARSER=deepseek_v4
+    LOAD_FORMAT=instanttensor
+    VLLM_API_PORT=8011
+    VLLM_MASTER_PORT=29501
+    ENFORCE_EAGER=0
+    DTYPE=bfloat16
+    VLLM_EXTRA_ARGS=--disable-custom-all-reduce
+    NCCL_NVLS_ENABLE=0
+    NCCL_SHM_DISABLE=1
+  "
+
   # DeepSeek V4 Flash — native FP4+FP8 mixed checkpoint, TP=2
   # ~158GB weights, ~79GB/node. Quality baseline — test first.
   # Deploy: ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster deepseek-v4-flash
@@ -171,10 +244,11 @@ declare -A MODELS=(
     SPECULATIVE_NUM_TOKENS=1
   "
 
-# DeepSeek V4 Flash — W4A16-FP8 quant (pastapaul), TP=2
-  # ~143GB weights, ~71GB/node. More KV headroom than native checkpoint.
-  # GB10-validated. Compare quality vs native before committing as daily driver.
-  # NOTE: TP>2 blocked by vllm#41511 (W4A16 MoE scale-sharding). TP=2 only.
+# DeepSeek V4 Flash — W4A16-FP8 (pastapaul/Pasta checkpoint), TP=2, Ray
+  # compressed-tensors quantization — NO Marlin prep spike, clean Ray TP=2 boot.
+  # This is the checkpoint the community TP=2 recipes use. NFS is fine here
+  # since compressed-tensors loading doesn't cause the GB10 page cache OOM
+  # that the native FP4+FP8 checkpoint does (different kernel path entirely).
   # Deploy: ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster deepseek-v4-flash-w4a16
   #         ./vllm_cluster_orchestrator.sh --nodes 3,4 load-model deepseek-v4-flash-w4a16
   [deepseek-v4-flash-w4a16]="
@@ -182,9 +256,9 @@ declare -A MODELS=(
     MODEL_DIR=/mnt/network/data/models/huggingface/hf/pastapaul/DeepSeek-V4-Flash-W4A16-FP8
     SERVED_MODEL_NAME=deepseek-v4-flash-284b-a13b
     TENSOR_PARALLEL_SIZE=2
-    MAX_MODEL_LEN=524288
+    MAX_MODEL_LEN=655360
     MAX_NUM_SEQS=2
-    GPU_MEMORY_UTILIZATION=0.15
+    GPU_MEMORY_UTILIZATION=0.70
     ENABLE_PREFIX_CACHING=1
     ENABLE_CHUNKED_PREFILL=1
     KV_CACHE_DTYPE=fp8
@@ -195,38 +269,17 @@ declare -A MODELS=(
     ENABLE_AUTO_TOOL_CHOICE=1
     TOOL_CALL_PARSER=deepseek_v4
     REASONING_PARSER=deepseek_v4
-    LOAD_FORMAT=instanttensor
-    VLLM_API_PORT=8000
-    VLLM_MASTER_PORT=29500
+    LOAD_FORMAT=safetensors
+    VLLM_API_PORT=8011
+    VLLM_MASTER_PORT=29501
     RAY_MIN_WORKER_PORT=20000
     RAY_MAX_WORKER_PORT=29000
     RAY_OBJECT_STORE_GB=1
-    ENFORCE_EAGER=1
-    VLLM_EXTRA_ARGS=--disable-custom-all-reduce
-  "
-
-  # =========================================================================
-  # DeepSeek (MLA architecture — parked due to CUBLAS sm_121 bug)
-  # =========================================================================
-
-  # DeepSeek V3 (cognitivecomputations AWQ) — BROKEN: fused shard validation
-  [deepseek-v3-dense]="
-    DOCKER_IMAGE=vllm-gb10-0.18.0
-    MODEL_DIR=/opt/ai-models/hf/cognitivecomputations/DeepSeek-V3-AWQ
-    SERVED_MODEL_NAME=chat-heavy,chat-heavy-deepseek,deepseek-v3-671b-a37b
-    TENSOR_PARALLEL_SIZE=4
-    MAX_MODEL_LEN=143360
-    MAX_NUM_SEQS=1
-    GPU_MEMORY_UTILIZATION=0.88
-    ENABLE_PREFIX_CACHING=1
-    ENABLE_CHUNKED_PREFILL=1
-    KV_CACHE_DTYPE=auto
-    TRUST_REMOTE_CODE=1
-    ENABLE_AUTO_TOOL_CHOICE=1
-    TOOL_CALL_PARSER=hermes
-    VLLM_PORT=8000
-    RAY_OBJECT_STORE_GB=2
     ENFORCE_EAGER=0
+    DTYPE=bfloat16
+    VLLM_EXTRA_ARGS=--disable-custom-all-reduce
+    NCCL_NVLS_ENABLE=0
+    NCCL_SHM_DISABLE=1
   "
 
   # DeepSeek V3.2 (QuantTrio AWQ) — BROKEN: requires sparse MLA (DSA), no backend for sm_121
