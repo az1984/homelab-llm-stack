@@ -133,7 +133,7 @@ VLLM_WORKER_PORT_BASE="${VLLM_WORKER_PORT_BASE:-}"
 SPECULATIVE_METHOD="${SPECULATIVE_METHOD:-}"
 SPECULATIVE_NUM_TOKENS="${SPECULATIVE_NUM_TOKENS:-}"
 NUM_SPECULATIVE_TOKENS="${NUM_SPECULATIVE_TOKENS:-}"
-DISTRIBUTED_EXECUTOR_BACKEND="${DISTRIBUTED_EXECUTOR_BACKEND:-}"
+CLUSTER_EXECUTOR_BACKEND="${CLUSTER_EXECUTOR_BACKEND:-}"  # Orchestrator/mgr only — never passed to vLLM. Use "ray" or "mp".
 LOAD_FORMAT="${LOAD_FORMAT:-}"
 COMPILATION_CONFIG="${COMPILATION_CONFIG:-}"
 VLLM_LOGFILE="${VLLM_LOGFILE:-${LOG_DIR}/vllm_${SERVED_MODEL_NAME}_node${THIS_NODE}.log}"
@@ -304,25 +304,17 @@ BuildVLLMArgs() {
     --tensor-parallel-size "${TENSOR_PARALLEL_SIZE}"
     --pipeline-parallel-size "${PIPELINE_PARALLEL_SIZE}"
   )
-  # Executor backend: default to ray for multi-node TP, mp for TP=1.
-  # Override via DISTRIBUTED_EXECUTOR_BACKEND=mp to use multiprocess (no Ray, no Ray OOM monitor).
-  # For mp multi-node (VLLM_NNODES > 1), omit --distributed-executor-backend entirely —
-  # vLLM infers mp from --nnodes. Injecting it causes follower-node detection to break.
-  # Mirrors launch-cluster.sh which strips --distributed-executor-backend before per-node launch.
-  local _executor_backend="${DISTRIBUTED_EXECUTOR_BACKEND:-}"
-  local _nnodes="${VLLM_NNODES:-1}"
-  if [[ -z "${_executor_backend}" && "${TENSOR_PARALLEL_SIZE}" -gt 1 && "${_nnodes}" -le 1 ]]; then
-    _executor_backend="ray"
-  fi
-  [[ -n "${_executor_backend}" && "${_nnodes}" -le 1 ]] && args+=(--distributed-executor-backend "${_executor_backend}")
+  # CLUSTER_EXECUTOR_BACKEND is an orchestrator/mgr-only variable — never passed to vLLM.
+  # vLLM infers the executor from --nnodes (mp) or Ray being present (ray).
+  # No --distributed-executor-backend is injected here.
 
   # Explicit rendezvous port — decouples NCCL/PyTorch distributed init from VLLM_PORT.
   # Without this, vLLM defaults to VLLM_PORT+1 which collides with other services.
   [[ -n "${VLLM_MASTER_PORT}" ]] && args+=(--master-port "${VLLM_MASTER_PORT}")
 
-  # mp multi-node flags — only relevant when DISTRIBUTED_EXECUTOR_BACKEND=mp and nnodes>1.
+  # mp multi-node flags — only relevant when CLUSTER_EXECUTOR_BACKEND=mp and nnodes>1.
   # VLLM_NNODES, VLLM_NODE_RANK, VLLM_MASTER_ADDR, and VLLM_HEADLESS are injected
-  # per-node by the orchestrator during mp load-model launches.
+  # per-node by the orchestrator during mp (CLUSTER_EXECUTOR_BACKEND=mp) load-model launches.
   [[ -n "${VLLM_NNODES:-}" ]] && args+=(--nnodes "${VLLM_NNODES}")
   [[ -n "${VLLM_NODE_RANK:-}" ]] && args+=(--node-rank "${VLLM_NODE_RANK}")
   [[ -n "${VLLM_MASTER_ADDR:-}" ]] && args+=(--master-addr "${VLLM_MASTER_ADDR}")
@@ -425,7 +417,7 @@ LoadModel() {
 
   # TP=1 or mp backend: unset RAY_ADDRESS so vLLM doesn't auto-detect Ray
   # and fall back to the Ray executor instead of multiproc.
-  if [[ "${TENSOR_PARALLEL_SIZE}" -le 1 || "${DISTRIBUTED_EXECUTOR_BACKEND}" == "mp" ]]; then
+  if [[ "${TENSOR_PARALLEL_SIZE}" -le 1 || "${CLUSTER_EXECUTOR_BACKEND}" == "mp" ]]; then
     Log "  Executor: multiproc (Ray disabled)"
     unset RAY_ADDRESS
   fi
