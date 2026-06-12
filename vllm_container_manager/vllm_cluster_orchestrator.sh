@@ -252,7 +252,7 @@ cmd_load_model() {
   # Extract settings
   local ray_store_gb=$(echo "$model_config" | grep RAY_OBJECT_STORE_GB | cut -d'=' -f2 | xargs)
   local tp_size=$(echo "$model_config" | grep TENSOR_PARALLEL_SIZE | cut -d'=' -f2 | xargs)
-  local executor_backend=$(echo "$model_config" | grep DISTRIBUTED_EXECUTOR_BACKEND | cut -d'=' -f2 | xargs)
+  local executor_backend=$(echo "$model_config" | grep CLUSTER_EXECUTOR_BACKEND | cut -d'=' -f2 | xargs)
   
   # Validate we have enough active nodes
   if [[ ${#ACTIVE_NODES[@]} -gt 0 ]]; then
