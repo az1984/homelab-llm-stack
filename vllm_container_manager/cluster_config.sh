@@ -286,7 +286,7 @@ declare -A MODELS=(
     DG_JIT_NVCC_COMPILER=/usr/local/cuda/bin/nvcc
     NCCL_IB_DISABLE=0
     NCCL_DEBUG=WARN
-    VLLM_EXTRA_ARGS=--disable-custom-all-reduce
+    VLLM_EXTRA_ARGS=--disable-custom-all-reduce --data-parallel-backend mp
     NCCL_NVLS_ENABLE=0
     NCCL_SHM_DISABLE=1
   "
