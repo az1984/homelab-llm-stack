@@ -40,7 +40,7 @@ declare -A CUSTOM_IMAGES=(
   [vllm-cluster-universal]="192.168.2.42:5000/vllm-cluster-universal:2026-05-29_b03"
   [vllm-eugr-0.22.0]="192.168.2.42:5000/vllm-eugr-0.22.0:2026-06-04_b01"
   [vllm-jasl-ds4]="192.168.2.42:5000/vllm-jasl-ds4:2026-06-05_b01"
-  [vllm-pasta]="192.168.2.42:5000/vllm-pasta:2026-06-11_b04"
+  [vllm-pasta]="192.168.2.42:5000/vllm-pasta:2026-06-12_b01"
 )
 
 # Images that require a specific entrypoint (NGC-based images need their setup script)
