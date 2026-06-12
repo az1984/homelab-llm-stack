@@ -257,7 +257,6 @@ declare -A MODELS=(
     MODEL_DIR=/mnt/network/data/models/huggingface/hf/deepseek-ai/DeepSeek-V4-Flash
     SERVED_MODEL_NAME=deepseek-v4-flash-284b-a13b
     TENSOR_PARALLEL_SIZE=2
-    DISTRIBUTED_EXECUTOR_BACKEND=mp
     MAX_MODEL_LEN=200000
     MAX_NUM_SEQS=2
     MAX_NUM_BATCHED_TOKENS=4192
@@ -286,7 +285,7 @@ declare -A MODELS=(
     DG_JIT_NVCC_COMPILER=/usr/local/cuda/bin/nvcc
     NCCL_IB_DISABLE=0
     NCCL_DEBUG=WARN
-    VLLM_EXTRA_ARGS=--disable-custom-all-reduce --data-parallel-backend mp
+    VLLM_EXTRA_ARGS=--disable-custom-all-reduce
     NCCL_NVLS_ENABLE=0
     NCCL_SHM_DISABLE=1
   "
