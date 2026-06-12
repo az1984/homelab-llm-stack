@@ -306,9 +306,15 @@ BuildVLLMArgs() {
   )
   # Executor backend: default to ray for multi-node TP, mp for TP=1.
   # Override via DISTRIBUTED_EXECUTOR_BACKEND=mp to use multiprocess (no Ray, no Ray OOM monitor).
+  # For mp multi-node (VLLM_NNODES > 1), omit --distributed-executor-backend entirely —
+  # vLLM infers mp from --nnodes. Injecting it causes follower-node detection to break.
+  # Mirrors launch-cluster.sh which strips --distributed-executor-backend before per-node launch.
   local _executor_backend="${DISTRIBUTED_EXECUTOR_BACKEND:-}"
-  [[ -z "${_executor_backend}" && "${TENSOR_PARALLEL_SIZE}" -gt 1 ]] && _executor_backend="ray"
-  [[ -n "${_executor_backend}" ]] && args+=(--distributed-executor-backend "${_executor_backend}")
+  local _nnodes="${VLLM_NNODES:-1}"
+  if [[ -z "${_executor_backend}" && "${TENSOR_PARALLEL_SIZE}" -gt 1 && "${_nnodes}" -le 1 ]]; then
+    _executor_backend="ray"
+  fi
+  [[ -n "${_executor_backend}" && "${_nnodes}" -le 1 ]] && args+=(--distributed-executor-backend "${_executor_backend}")
 
   # Explicit rendezvous port — decouples NCCL/PyTorch distributed init from VLLM_PORT.
   # Without this, vLLM defaults to VLLM_PORT+1 which collides with other services.
