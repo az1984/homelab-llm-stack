@@ -183,15 +183,24 @@ declare -A MODELS=(
   # MTP to be added once concurrency is validated.
   # Deploy: ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster deepseek-v4-flash-tp2-local
   #         ./vllm_cluster_orchestrator.sh --nodes 3,4 load-model deepseek-v4-flash-tp2-local
+  
+  # DeepSeek V4 Flash — local SSD, TP=2, mp executor (no Ray), silicon+phosphorus
+  # Weights at /opt/ai-models/hf to eliminate NFS page cache pressure during Marlin prep.
+  # DISTRIBUTED_EXECUTOR_BACKEND=mp bypasses Ray OOM monitor (the TP=2 boot killer).
+  # Same context as TP=4 baseline to start; tune after boot confirmed.
+  # MTP to be added once concurrency is validated.
+  # Deploy: ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster deepseek-v4-flash-tp2-local
+  #         ./vllm_cluster_orchestrator.sh --nodes 3,4 load-model deepseek-v4-flash-tp2-local
   [deepseek-v4-flash-tp2-local]="
-    DOCKER_IMAGE=vllm-jasl-ds4
+    DOCKER_IMAGE=vllm-pasta
     MODEL_DIR=/opt/ai-models/hf/deepseek-ai/DeepSeek-V4-Flash
     SERVED_MODEL_NAME=deepseek-v4-flash-284b-a13b
     TENSOR_PARALLEL_SIZE=2
-    CLUSTER_EXECUTOR_BACKEND=mp
-    MAX_MODEL_LEN=655360
-    MAX_NUM_SEQS=2
-    GPU_MEMORY_UTILIZATION=0.70
+    CLUSTER_EXECUTOR_BACKEND=ray
+    MAX_MODEL_LEN=1000000
+    MAX_NUM_SEQS=4
+    MAX_NUM_BATCHED_TOKENS=4192
+    GPU_MEMORY_UTILIZATION=0.88
     ENABLE_PREFIX_CACHING=1
     ENABLE_CHUNKED_PREFILL=1
     KV_CACHE_DTYPE=fp8
@@ -202,14 +211,28 @@ declare -A MODELS=(
     ENABLE_AUTO_TOOL_CHOICE=1
     TOOL_CALL_PARSER=deepseek_v4
     REASONING_PARSER=deepseek_v4
-    LOAD_FORMAT=instanttensor
+    LOAD_FORMAT=safetensors
     VLLM_API_PORT=8011
     VLLM_MASTER_PORT=29501
+    RAY_MIN_WORKER_PORT=20000
+    RAY_MAX_WORKER_PORT=29000
+    RAY_OBJECT_STORE_GB=1
     ENFORCE_EAGER=0
     DTYPE=bfloat16
+    TORCH_CUDA_ARCH_LIST=12.1a
+    VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
+    VLLM_TRITON_MLA_SPARSE=1
+    FLASHINFER_DISABLE_VERSION_CHECK=1
+    TILELANG_CLEANUP_TEMP_FILES=1
+    DG_JIT_USE_NVRTC=0
+    DG_JIT_NVCC_COMPILER=/usr/local/cuda/bin/nvcc
+    NCCL_IB_DISABLE=0
+    NCCL_DEBUG=WARN
     VLLM_EXTRA_ARGS=--disable-custom-all-reduce
     NCCL_NVLS_ENABLE=0
     NCCL_SHM_DISABLE=1
+	SPECULATIVE_METHOD=deepseek_mtp
+	NUM_SPECULATIVE_TOKENS=2
   "
 
   # DeepSeek V4 Flash — native FP4+FP8 mixed checkpoint, TP=2

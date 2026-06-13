@@ -304,9 +304,13 @@ BuildVLLMArgs() {
     --tensor-parallel-size "${TENSOR_PARALLEL_SIZE}"
     --pipeline-parallel-size "${PIPELINE_PARALLEL_SIZE}"
   )
-  # CLUSTER_EXECUTOR_BACKEND is an orchestrator/mgr-only variable — never passed to vLLM.
-  # vLLM infers the executor from --nnodes (mp) or Ray being present (ray).
-  # No --distributed-executor-backend is injected here.
+  # CLUSTER_EXECUTOR_BACKEND is an orchestrator/mgr-only routing variable.
+  # Ray multi-node: vLLM requires --distributed-executor-backend ray explicitly when
+  # world_size > local GPUs. mp multi-node: omit it — vLLM infers mp from --nnodes,
+  # and injecting it breaks follower-node detection (mirrors launch-cluster.sh behavior).
+  if [[ "${CLUSTER_EXECUTOR_BACKEND}" == "ray" && "${TENSOR_PARALLEL_SIZE}" -gt 1 ]]; then
+    args+=(--distributed-executor-backend ray)
+  fi
 
   # Explicit rendezvous port — decouples NCCL/PyTorch distributed init from VLLM_PORT.
   # Without this, vLLM defaults to VLLM_PORT+1 which collides with other services.
