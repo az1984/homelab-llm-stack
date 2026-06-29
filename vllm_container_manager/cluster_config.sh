@@ -40,6 +40,7 @@ declare -A CUSTOM_IMAGES=(
   [vllm-cluster-universal]="192.168.2.42:5000/vllm-cluster-universal:2026-05-29_b03"
   [vllm-eugr-0.22.0]="192.168.2.42:5000/vllm-eugr-0.22.0:2026-06-04_b01"
   [vllm-jasl-ds4]="192.168.2.42:5000/vllm-jasl-ds4:2026-06-05_b01"
+  [vllm-pasta]="192.168.2.42:5000/vllm-pasta:2026-06-12_b03"
 )
 
 # Images that require a specific entrypoint (NGC-based images need their setup script)
@@ -68,6 +69,7 @@ declare -A MODELS=(
     MODEL_DIR=/opt/ai-models/hf/qwen3/Qwen3-VL-235B-A22B-Thinking-AWQ
     SERVED_MODEL_NAME=qwen3-vl-235b-a22b
     TENSOR_PARALLEL_SIZE=2
+    CLUSTER_EXECUTOR_BACKEND=ray
     QUANTIZATION=awq_marlin
     MAX_MODEL_LEN=200000
     MAX_NUM_SEQS=2
@@ -109,6 +111,7 @@ declare -A MODELS=(
     MODEL_DIR=/mnt/network/data/models/huggingface/hf/deepseek-ai/DeepSeek-V4-Flash
     SERVED_MODEL_NAME=deepseek-v4-flash-284b-a13b
     TENSOR_PARALLEL_SIZE=4
+    CLUSTER_EXECUTOR_BACKEND=ray
     MAX_MODEL_LEN=655360
     MAX_NUM_SEQS=2
     GPU_MEMORY_UTILIZATION=0.50
@@ -146,6 +149,7 @@ declare -A MODELS=(
     MODEL_DIR=/mnt/network/data/models/huggingface/hf/deepseek-ai/DeepSeek-V4-Flash
     SERVED_MODEL_NAME=deepseek-v4-flash-284b-a13b
     TENSOR_PARALLEL_SIZE=2
+    CLUSTER_EXECUTOR_BACKEND=ray
     MAX_MODEL_LEN=819200
     MAX_NUM_SEQS=3
     GPU_MEMORY_UTILIZATION=0.70
@@ -174,20 +178,29 @@ declare -A MODELS=(
 
   # DeepSeek V4 Flash — local SSD, TP=2, mp executor (no Ray), silicon+phosphorus
   # Weights at /opt/ai-models/hf to eliminate NFS page cache pressure during Marlin prep.
+  # CLUSTER_EXECUTOR_BACKEND=mp bypasses Ray OOM monitor (the TP=2 boot killer).
+  # Same context as TP=4 baseline to start; tune after boot confirmed.
+  # MTP to be added once concurrency is validated.
+  # Deploy: ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster deepseek-v4-flash-tp2-local
+  #         ./vllm_cluster_orchestrator.sh --nodes 3,4 load-model deepseek-v4-flash-tp2-local
+  
+  # DeepSeek V4 Flash — local SSD, TP=2, mp executor (no Ray), silicon+phosphorus
+  # Weights at /opt/ai-models/hf to eliminate NFS page cache pressure during Marlin prep.
   # DISTRIBUTED_EXECUTOR_BACKEND=mp bypasses Ray OOM monitor (the TP=2 boot killer).
   # Same context as TP=4 baseline to start; tune after boot confirmed.
   # MTP to be added once concurrency is validated.
   # Deploy: ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster deepseek-v4-flash-tp2-local
   #         ./vllm_cluster_orchestrator.sh --nodes 3,4 load-model deepseek-v4-flash-tp2-local
   [deepseek-v4-flash-tp2-local]="
-    DOCKER_IMAGE=vllm-jasl-ds4
+    DOCKER_IMAGE=vllm-pasta
     MODEL_DIR=/opt/ai-models/hf/deepseek-ai/DeepSeek-V4-Flash
     SERVED_MODEL_NAME=deepseek-v4-flash-284b-a13b
     TENSOR_PARALLEL_SIZE=2
-    DISTRIBUTED_EXECUTOR_BACKEND=mp
-    MAX_MODEL_LEN=655360
-    MAX_NUM_SEQS=2
-    GPU_MEMORY_UTILIZATION=0.70
+    CLUSTER_EXECUTOR_BACKEND=ray
+    MAX_MODEL_LEN=1000000
+    MAX_NUM_SEQS=4
+    MAX_NUM_BATCHED_TOKENS=4192
+    GPU_MEMORY_UTILIZATION=0.88
     ENABLE_PREFIX_CACHING=1
     ENABLE_CHUNKED_PREFILL=1
     KV_CACHE_DTYPE=fp8
@@ -198,14 +211,28 @@ declare -A MODELS=(
     ENABLE_AUTO_TOOL_CHOICE=1
     TOOL_CALL_PARSER=deepseek_v4
     REASONING_PARSER=deepseek_v4
-    LOAD_FORMAT=instanttensor
+    LOAD_FORMAT=safetensors
     VLLM_API_PORT=8011
     VLLM_MASTER_PORT=29501
+    RAY_MIN_WORKER_PORT=20000
+    RAY_MAX_WORKER_PORT=29000
+    RAY_OBJECT_STORE_GB=1
     ENFORCE_EAGER=0
     DTYPE=bfloat16
+    TORCH_CUDA_ARCH_LIST=12.1a
+    VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
+    VLLM_TRITON_MLA_SPARSE=1
+    FLASHINFER_DISABLE_VERSION_CHECK=1
+    TILELANG_CLEANUP_TEMP_FILES=1
+    DG_JIT_USE_NVRTC=0
+    DG_JIT_NVCC_COMPILER=/usr/local/cuda/bin/nvcc
+    NCCL_IB_DISABLE=0
+    NCCL_DEBUG=WARN
     VLLM_EXTRA_ARGS=--disable-custom-all-reduce
     NCCL_NVLS_ENABLE=0
     NCCL_SHM_DISABLE=1
+	SPECULATIVE_METHOD=deepseek_mtp
+	NUM_SPECULATIVE_TOKENS=2
   "
 
   # DeepSeek V4 Flash — native FP4+FP8 mixed checkpoint, TP=2
@@ -217,6 +244,7 @@ declare -A MODELS=(
     MODEL_DIR=/mnt/network/data/models/huggingface/hf/deepseek-ai/DeepSeek-V4-Flash
     SERVED_MODEL_NAME=deepseek-v4-flash-284b-a13b
     TENSOR_PARALLEL_SIZE=4
+    CLUSTER_EXECUTOR_BACKEND=ray
     MAX_MODEL_LEN=655360
     MAX_NUM_SEQS=2
     GPU_MEMORY_UTILIZATION=0.50
@@ -244,21 +272,23 @@ declare -A MODELS=(
     SPECULATIVE_NUM_TOKENS=1
   "
 
-# DeepSeek V4 Flash — W4A16-FP8 (pastapaul/Pasta checkpoint), TP=2, Ray
-  # compressed-tensors quantization — NO Marlin prep spike, clean Ray TP=2 boot.
-  # This is the checkpoint the community TP=2 recipes use. NFS is fine here
-  # since compressed-tensors loading doesn't cause the GB10 page cache OOM
-  # that the native FP4+FP8 checkpoint does (different kernel path entirely).
+# DeepSeek V4 Flash — native FP8, TP=2, mp executor, vllm-pasta image
+  # Uses eugr PR #219 image (vllm-node-dsv4/vllm-pasta) built from jasl/vllm
+  # codex/ds4-sm120-min-enable branch. Native FP8 checkpoint (not Pasta/W4A16).
+  # mp backend bypasses Ray OOM monitor. NFS weight path — no Marlin prep spike
+  # with safetensors load format. Based on community-verified recipe.
   # Deploy: ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster deepseek-v4-flash-w4a16
   #         ./vllm_cluster_orchestrator.sh --nodes 3,4 load-model deepseek-v4-flash-w4a16
   [deepseek-v4-flash-w4a16]="
-    DOCKER_IMAGE=vllm-jasl-ds4
-    MODEL_DIR=/mnt/network/data/models/huggingface/hf/pastapaul/DeepSeek-V4-Flash-W4A16-FP8
+    DOCKER_IMAGE=vllm-pasta
+    MODEL_DIR=/mnt/network/data/models/huggingface/hf/deepseek-ai/DeepSeek-V4-Flash
     SERVED_MODEL_NAME=deepseek-v4-flash-284b-a13b
     TENSOR_PARALLEL_SIZE=2
-    MAX_MODEL_LEN=655360
+    CLUSTER_EXECUTOR_BACKEND=mp
+    MAX_MODEL_LEN=200000
     MAX_NUM_SEQS=2
-    GPU_MEMORY_UTILIZATION=0.70
+    MAX_NUM_BATCHED_TOKENS=4192
+    GPU_MEMORY_UTILIZATION=0.85
     ENABLE_PREFIX_CACHING=1
     ENABLE_CHUNKED_PREFILL=1
     KV_CACHE_DTYPE=fp8
@@ -272,11 +302,17 @@ declare -A MODELS=(
     LOAD_FORMAT=safetensors
     VLLM_API_PORT=8011
     VLLM_MASTER_PORT=29501
-    RAY_MIN_WORKER_PORT=20000
-    RAY_MAX_WORKER_PORT=29000
-    RAY_OBJECT_STORE_GB=1
     ENFORCE_EAGER=0
     DTYPE=bfloat16
+    TORCH_CUDA_ARCH_LIST=12.1a
+    VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
+    VLLM_TRITON_MLA_SPARSE=1
+    FLASHINFER_DISABLE_VERSION_CHECK=1
+    TILELANG_CLEANUP_TEMP_FILES=1
+    DG_JIT_USE_NVRTC=0
+    DG_JIT_NVCC_COMPILER=/usr/local/cuda/bin/nvcc
+    NCCL_IB_DISABLE=0
+    NCCL_DEBUG=WARN
     VLLM_EXTRA_ARGS=--disable-custom-all-reduce
     NCCL_NVLS_ENABLE=0
     NCCL_SHM_DISABLE=1
@@ -288,6 +324,7 @@ declare -A MODELS=(
     MODEL_DIR=/opt/ai-models/hf/QuantTrio/DeepSeek-V3.2-AWQ
     SERVED_MODEL_NAME=chat-heavy,chat-heavy-deepseek,deepseek-v3.2-671b
     TENSOR_PARALLEL_SIZE=4
+    CLUSTER_EXECUTOR_BACKEND=ray
     QUANTIZATION=awq
     MAX_MODEL_LEN=143360
     MAX_NUM_SEQS=1
@@ -309,6 +346,7 @@ declare -A MODELS=(
     MODEL_DIR=/opt/ai-models/hf/QuantTrio/DeepSeek-V3.1-AWQ
     SERVED_MODEL_NAME=chat-heavy,chat-heavy-deepseek,deepseek-v3.1-685b-a37b
     TENSOR_PARALLEL_SIZE=4
+    CLUSTER_EXECUTOR_BACKEND=ray
     QUANTIZATION=awq_marlin
     MAX_MODEL_LEN=143360
     MAX_NUM_SEQS=1
@@ -331,6 +369,7 @@ declare -A MODELS=(
     MODEL_DIR=/opt/ai-models/hf/DeepSeek-R1-AWQ
     SERVED_MODEL_NAME=chat-heavy,chat-heavy-deepseek,deepseek-r1-671b-a37b
     TENSOR_PARALLEL_SIZE=4
+    CLUSTER_EXECUTOR_BACKEND=ray
     QUANTIZATION=awq
     MAX_MODEL_LEN=163840
     MAX_NUM_SEQS=2
@@ -446,6 +485,7 @@ declare -A MODELS=(
     SERVED_MODEL_NAME=qwen35-122b-a10b
     AUTO_AWQ_MARLIN=0
     TENSOR_PARALLEL_SIZE=2
+    CLUSTER_EXECUTOR_BACKEND=ray
     MAX_MODEL_LEN=250000
     MAX_NUM_SEQS=12
     MAX_NUM_BATCHED_TOKENS=8192
@@ -474,6 +514,7 @@ declare -A MODELS=(
     SERVED_MODEL_NAME=qwen35-397b-a17b
     AUTO_AWQ_MARLIN=0
     TENSOR_PARALLEL_SIZE=4
+    CLUSTER_EXECUTOR_BACKEND=ray
     MAX_MODEL_LEN=250000
     MAX_NUM_SEQS=2
     MAX_NUM_BATCHED_TOKENS=8192
@@ -522,6 +563,7 @@ declare -A MODELS=(
     SERVED_MODEL_NAME=chat-ultra-heavy,chat-heavy-qwen,qwen35-397b-a17b
     AUTO_AWQ_MARLIN=0
     TENSOR_PARALLEL_SIZE=2
+    CLUSTER_EXECUTOR_BACKEND=ray
     MAX_MODEL_LEN=200000
     MAX_NUM_SEQS=1
     MAX_NUM_BATCHED_TOKENS=8192
@@ -576,6 +618,7 @@ declare -A MODELS=(
     SERVED_MODEL_NAME=chat-ultra-heavy,chat-heavy-qwen,qwen35-397b-a17b
     AUTO_AWQ_MARLIN=0
     TENSOR_PARALLEL_SIZE=4
+    CLUSTER_EXECUTOR_BACKEND=ray
     MAX_MODEL_LEN=262144
     MAX_NUM_SEQS=4
     MAX_NUM_BATCHED_TOKENS=8192
@@ -631,6 +674,7 @@ declare -A MODELS=(
     SERVED_MODEL_NAME=chat-heavy,chat-heavy-glm,glm-4.7
     AUTO_AWQ_MARLIN=0
     TENSOR_PARALLEL_SIZE=4
+    CLUSTER_EXECUTOR_BACKEND=ray
     MAX_MODEL_LEN=200000
     MAX_NUM_SEQS=4
     MAX_NUM_BATCHED_TOKENS=8192
@@ -662,6 +706,7 @@ declare -A MODELS=(
     SERVED_MODEL_NAME=chat-heavy,chat-heavy-minimax,minimax-m2.7-229b-a10b
     AUTO_AWQ_MARLIN=0
     TENSOR_PARALLEL_SIZE=4
+    CLUSTER_EXECUTOR_BACKEND=ray
     MAX_MODEL_LEN=131072
     MAX_NUM_SEQS=4
     MAX_NUM_BATCHED_TOKENS=8192
@@ -692,6 +737,7 @@ declare -A MODELS=(
     SERVED_MODEL_NAME=chat-heavy,chat-heavy-minimax,minimax-m2.7-229b-a10b
     AUTO_AWQ_MARLIN=0
     TENSOR_PARALLEL_SIZE=2
+    CLUSTER_EXECUTOR_BACKEND=ray
     MAX_MODEL_LEN=131072
     MAX_NUM_SEQS=4
     MAX_NUM_BATCHED_TOKENS=8192

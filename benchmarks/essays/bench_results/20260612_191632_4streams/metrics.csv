@@ -1,0 +1,5 @@
+stream_id|subject|finish_reason|prompt_tokens|completion_tokens|total_tokens|wall_seconds|tok_per_sec
+3|How Mycorrhizal Networks Enable Forest Communication|stop|81|1822|1903|83.280090000|21.8
+4|The Rise and Fall of the Hanseatic League|stop|83|1999|2082|90.748417000|22.0
+1|Roman Empire Taxation and Its Impact on Provincial Economies|stop|83|2057|2140|93.241870000|22.0
+2|The Engineering Behind Medieval Cathedral Construction|stop|79|2301|2380|99.758750000|23.0

@@ -1,0 +1,4 @@
+stream_id|subject|finish_reason|prompt_tokens|completion_tokens|total_tokens|wall_seconds|tok_per_sec
+3|How Mycorrhizal Networks Enable Forest Communication|stop|81|1674|1755|71.035444000|23.5
+2|The Engineering Behind Medieval Cathedral Construction|stop|79|2381|2460|94.779871000|25.1
+1|Roman Empire Taxation and Its Impact on Provincial Economies|stop|83|2469|2552|96.981374000|25.4
