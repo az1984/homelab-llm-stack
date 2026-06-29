@@ -1,12 +1,68 @@
 #!/usr/bin/env bash
+# vllm_cluster_orchestrator.sh
+#
+# Outer shell: fans out SSH commands to cluster nodes to manage vLLM containers.
+# Reads profile definitions from cluster_config.sh.
+# Reads aliases + sequences from cluster_favorites.sh.
+# Reads API keys from cluster.env (local only — never deployed to nodes).
+#
+# Usage:
+#   ./vllm_cluster_orchestrator.sh [--nodes N,M,...] <command> [args]
+#   ./vllm_cluster_orchestrator.sh fav <alias-or-sequence>
+#   ./vllm_cluster_orchestrator.sh fav list
+#
+# Commands:
+#   start-cluster [PROFILE]    Start containers; infer node count from profile TP
+#   start-cluster N [PROFILE]  Start N containers (explicit node count)
+#   load-model PROFILE         Start Ray + load model into running containers
+#   unload-model               Unload model (keep Ray + containers running)
+#   stop-cluster [PROFILE]     Stop containers: all on selected nodes (no PROFILE)
+#                              or only containers for PROFILE (surgical)
+#   status                     Show container status + Ray info across nodes
+#   details                    Probe API endpoints, show served model names
+#   fav list                   List all registered aliases and sequences
+#   fav <name>                 Expand alias or run a multi-step sequence
+
 set -euo pipefail
 
-source cluster_config.sh
+# ==============================================================================
+# Source config, favorites, and environment
+# ==============================================================================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+source "${SCRIPT_DIR}/cluster_config.sh"
+source "${SCRIPT_DIR}/cluster_favorites.sh"
+
+# Load API keys from cluster.env if present — sourced locally, injected via -e
+ENV_FILE="${SCRIPT_DIR}/cluster.env"
+ENV_INJECT_ARGS=""
+if [[ -f "${ENV_FILE}" ]]; then
+  # Parse non-comment, non-empty lines into -e KEY=VALUE args
+  while IFS= read -r line; do
+    # Skip blank lines and comments
+    [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+    # Basic sanity: must look like KEY=VALUE
+    [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
+    key="${line%%=*}"
+    value="${line#*=}"
+    # Skip if value is empty
+    [[ -z "$value" ]] && continue
+    ENV_INJECT_ARGS="${ENV_INJECT_ARGS} -e ${key}=$(printf '%q' "${value}")"
+    export "${key}=${value}"
+  done < "${ENV_FILE}"
+fi
+
+# ==============================================================================
+# Logging
+# ==============================================================================
 Log() { echo "[orchestrator] $*"; }
+Die() { echo "[orchestrator] ERROR: $*" >&2; exit 1; }
 
-# Parse --nodes filter if provided
+# ==============================================================================
+# Node filter
+# ==============================================================================
 ACTIVE_NODES=()
+
 parse_node_filter() {
   local filter="$1"
   IFS=',' read -ra ACTIVE_NODES <<< "$filter"
@@ -15,9 +71,7 @@ parse_node_filter() {
 
 is_node_active() {
   local node=$1
-  # If no filter set, all nodes active
   [[ ${#ACTIVE_NODES[@]} -eq 0 ]] && return 0
-  # Check if node in filter
   for n in "${ACTIVE_NODES[@]}"; do
     [[ "$n" == "$node" ]] && return 0
   done
@@ -29,81 +83,128 @@ get_node_info() {
   local field=$2
   local info="${NODES[$node_num]}"
   case $field in
-    lan_ip) echo "$info" | cut -d: -f1 ;;
-    name) echo "$info" | cut -d: -f2 ;;
+    lan_ip)    echo "$info" | cut -d: -f1 ;;
+    name)      echo "$info" | cut -d: -f2 ;;
     fabric_ip) echo "$info" | cut -d: -f3 ;;
   esac
 }
+
+# ==============================================================================
+# Container naming
+# ==============================================================================
+# Canonical name: {prefix}--{profile}--n{node_num}
+# prefix defaults to "vllm"; overridable per-profile via CONTAINER_PREFIX field.
+#
+# All docker commands go through container_name_for() — one place to change
+# if the scheme ever evolves.
+
+extract_profile_field() {
+  local profile="$1"
+  local field="$2"
+  local default="${3:-}"
+  local model_config="${MODELS[$profile]:-}"
+  local val
+  val=$(echo "$model_config" | grep "^[[:space:]]*${field}=" | cut -d'=' -f2 | xargs)
+  echo "${val:-$default}"
+}
+
+container_name_for() {
+  local profile="$1"
+  local node_num="$2"
+  local prefix
+  prefix=$(extract_profile_field "$profile" "CONTAINER_PREFIX" "vllm")
+  echo "${prefix}--${profile}--n${node_num}"
+}
+
+# ==============================================================================
+# ENV injection helpers
+# ==============================================================================
+
+# Build -e KEY=VALUE args from a model profile config block
+profile_env_args() {
+  local model_config="$1"
+  local args=""
+  while IFS='=' read -r key value; do
+    key=$(echo "$key" | xargs)
+    value=$(echo "$value" | xargs)
+    [[ -n "$key" && -n "$value" ]] && args="${args} -e ${key}=$(printf '%q' "${value}")"
+  done <<< "${model_config}"
+  echo "$args"
+}
+
+# ==============================================================================
+# ensure_container
+# ==============================================================================
+# Starts one container on one node for a given profile.
+# Container is named via container_name_for() — deterministic, profile-keyed.
+# Bakes profile env vars in at docker run AND injects cluster.env keys.
+# Labels baked in: cluster.profile, cluster.service, cluster.node
 
 ensure_container() {
   local node_num=$1
   local image_name=${2:-$DEFAULT_VLLM_IMAGE}
   local head_fabric_ip=${3:-}
   local profile=${4:-unknown}
-  
-  # Skip if not in active nodes
+
   is_node_active $node_num || { Log "Skipping node $node_num (filtered)"; return 0; }
-  
-  # Resolve image name to full path
+
   local image_path="${CUSTOM_IMAGES[$image_name]:-$image_name}"
-  
   local node_name=$(get_node_info $node_num name)
   local node_ip=$(get_node_info $node_num lan_ip)
   local fabric_ip=$(get_node_info $node_num fabric_ip)
+  local container_name
+  container_name=$(container_name_for "${profile}" "${node_num}")
 
-  # Extract served model name and build profile env args for baking into container
+  # Extract served model name and build profile env args
   local served_name="unknown"
-  local profile_env_args=""
+  local p_env_args=""
   if [[ "$profile" != "unknown" ]]; then
     local model_config="${MODELS[$profile]:-}"
     if [[ -n "${model_config}" ]]; then
       served_name=$(echo "$model_config" | grep "SERVED_MODEL_NAME=" | cut -d'=' -f2 | xargs)
-      # Bake all profile env vars into the container
-      # Values are quoted to handle spaces (e.g. VLLM_EXTRA_ARGS=--foo bar)
-      while IFS='=' read -r key value; do
-        key=$(echo "$key" | xargs)
-        value=$(echo "$value" | xargs)
-        [[ -n "$key" && -n "$value" ]] && profile_env_args="${profile_env_args} -e ${key}=$(printf '%q' "${value}")"
-      done <<< "${model_config}"
+      p_env_args=$(profile_env_args "${model_config}")
     fi
   fi
 
-  Log "Ensuring container on node ${node_num} (${node_name} @ ${node_ip})"
-  Log "  Using image: ${image_name} → ${image_path}"
-  Log "  Profile: ${profile} (${served_name})"
-  [[ -n "$head_fabric_ip" ]] && Log "  Ray head: ${head_fabric_ip}"
+  local service_type
+  service_type=$(extract_profile_field "$profile" "SERVICE_TYPE" "vllm")
 
-  # Remove old container if exists
-  ssh admin@${node_ip} "sudo docker rm -f vllm-node-${node_num} 2>/dev/null || true"
+  Log "Ensuring container on node ${node_num} (${node_name} @ ${node_ip})"
+  Log "  Container: ${container_name}"
+  Log "  Image:     ${image_name} → ${image_path}"
+  Log "  Profile:   ${profile} (${served_name})"
+  [[ -n "$head_fabric_ip" ]] && Log "  Ray head:  ${head_fabric_ip}"
+
+  # Remove old container with this exact name (surgical — does not touch other containers)
+  ssh admin@${node_ip} "sudo docker rm -f ${container_name} 2>/dev/null || true"
 
   # Pull image
   ssh admin@${node_ip} "sudo docker pull ${image_path}"
 
-  # Copy the manager script to the node
+  # Copy manager script
   scp vllm_cluster_mgr.sh admin@${node_ip}:/tmp/vllm_cluster_mgr.sh
 
-  # Build container command with optional RAY_HEAD_IP
   local env_ray_head=""
   [[ -n "$head_fabric_ip" ]] && env_ray_head="-e RAY_HEAD_IP=${head_fabric_ip}"
 
-  # Determine entrypoint: NGC images need their setup script, others use /bin/bash
   local entrypoint="${IMAGE_ENTRYPOINTS[$image_name]:-}"
-  local entrypoint_args
+  local entrypoint_args run_cmd
   if [[ -n "$entrypoint" ]]; then
     entrypoint_args="--entrypoint ${entrypoint}"
-    local run_cmd="sleep infinity"
+    run_cmd="sleep infinity"
   else
     entrypoint_args="--entrypoint /bin/bash"
-    local run_cmd="-c 'sleep infinity'"
+    run_cmd="-c 'sleep infinity'"
   fi
 
   Log "  Entrypoint: ${entrypoint:-/bin/bash (default)}"
 
-  # Start container
   ssh admin@${node_ip} "sudo docker run -d \
-    --name vllm-node-${node_num} \
-    --label vllm.profile=${profile} \
-    --label vllm.served_name=${served_name} \
+    --name ${container_name} \
+    --label cluster.profile=${profile} \
+    --label cluster.service=${service_type} \
+    --label cluster.node=${node_num} \
+    --label cluster.served_name=${served_name} \
     --gpus all \
     --device /dev/infiniband \
     --ipc=host \
@@ -120,7 +221,8 @@ ensure_container() {
     -e NCCL_IB_DISABLE=0 \
     -e NCCL_IB_HCA=rocep1s0f0 \
     -e NCCL_DEBUG=INFO \
-    ${profile_env_args} \
+    ${p_env_args} \
+    ${ENV_INJECT_ARGS} \
     -v /opt/ai-models:/opt/ai-models:ro \
     -v /mnt/network/ai-models:/mnt/network/ai-models:ro \
     -v /mnt/network/data/models:/mnt/network/data/models:ro \
@@ -134,48 +236,49 @@ ensure_container() {
     ${image_path} \
     ${run_cmd}"
 
-  Log "  Container started"
+  Log "  Container started: ${container_name}"
 }
 
+# ==============================================================================
+# Profile helpers
+# ==============================================================================
 get_profile_tp_size() {
   local profile=$1
-  local model_config="${MODELS[$profile]:-}"
-  if [[ -n "${model_config}" ]]; then
-    echo "$model_config" | grep "TENSOR_PARALLEL_SIZE=" | cut -d'=' -f2 | xargs
-  fi
+  extract_profile_field "$profile" "TENSOR_PARALLEL_SIZE" "2"
 }
 
+get_profile_image() {
+  local profile=$1
+  extract_profile_field "$profile" "DOCKER_IMAGE" "$DEFAULT_VLLM_IMAGE"
+}
+
+# ==============================================================================
+# cmd_start_cluster
+# ==============================================================================
 cmd_start_cluster() {
   local arg1=${1:-}
   local arg2=${2:-}
   local num_nodes=""
   local profile=""
 
-  # Parse args: start-cluster PROFILE | start-cluster N | start-cluster N PROFILE
   if [[ -n "$arg1" ]]; then
     if [[ "$arg1" =~ ^[0-9]+$ ]]; then
-      # First arg is a number — explicit node count
       num_nodes="$arg1"
       profile="${arg2:-}"
     else
-      # First arg is a profile name — infer node count from TP size
       profile="$arg1"
-      if [[ -n "$arg2" ]]; then
-        Log "WARNING: extra argument '$arg2' ignored (node count inferred from profile TP size)"
-      fi
+      [[ -n "$arg2" ]] && Log "WARNING: extra argument '$arg2' ignored (node count inferred from profile TP size)"
     fi
   fi
 
-  # If we have a profile, validate it exists
+  # Resolve favorite alias
+  [[ -n "$profile" ]] && profile=$(resolve_favorite "$profile")
+
   if [[ -n "$profile" ]]; then
     local model_config="${MODELS[$profile]:-}"
-    if [[ -z "${model_config}" ]]; then
-      Log "ERROR: Unknown profile '${profile}'"
-      exit 1
-    fi
+    [[ -z "${model_config}" ]] && Die "Unknown profile '${profile}'"
   fi
 
-  # Infer node count from profile TP size if not explicitly given
   if [[ -z "$num_nodes" ]]; then
     if [[ -n "$profile" ]]; then
       num_nodes=$(get_profile_tp_size "$profile")
@@ -185,14 +288,11 @@ cmd_start_cluster() {
       Log "No profile or node count given, defaulting to ${num_nodes} nodes"
     fi
   fi
-  
-  Log "=== Starting ${num_nodes}-node cluster ==="
 
-  # Always stop first — guarantees Ray is dead and no stale actor handles.
+  Log "=== Starting ${num_nodes}-node cluster ==="
   Log "Ensuring clean state (stop-cluster before start)..."
   cmd_stop_cluster
-  
-  # Determine head node (first active node or node 1)
+
   local head_node=1
   if [[ ${#ACTIVE_NODES[@]} -gt 0 ]]; then
     head_node="${ACTIVE_NODES[0]}"
@@ -202,180 +302,146 @@ cmd_start_cluster() {
     Log "All nodes 1-${num_nodes} will be used"
     Log "Head node: 1"
   fi
-  
-  local head_fabric_ip=$(get_node_info $head_node fabric_ip)
-  
-  # Determine which image to use
-  local image_name=$DEFAULT_VLLM_IMAGE
-  if [[ -n "$profile" ]]; then
-    local model_config="${MODELS[$profile]:-}"
-    if [[ -n "${model_config}" ]]; then
-      local docker_image=$(echo "$model_config" | grep "DOCKER_IMAGE=" | cut -d'=' -f2 | xargs)
-      [[ -n "$docker_image" ]] && image_name="$docker_image"
-      Log "Using image from profile '${profile}': ${image_name}"
-    fi
-  fi
 
-  # Use active nodes if filtered, otherwise sequential
+  local head_fabric_ip
+  head_fabric_ip=$(get_node_info $head_node fabric_ip)
+
+  local image_name=$DEFAULT_VLLM_IMAGE
+  [[ -n "$profile" ]] && image_name=$(get_profile_image "$profile")
+  Log "Image: ${image_name}"
+
   if [[ ${#ACTIVE_NODES[@]} -gt 0 ]]; then
     for node_num in "${ACTIVE_NODES[@]}"; do
-      ensure_container ${node_num} "${image_name}" "${head_fabric_ip}" "${profile}"
+      ensure_container ${node_num} "${image_name}" "${head_fabric_ip}" "${profile:-unknown}"
     done
   else
     for i in $(seq 1 ${num_nodes}); do
-      ensure_container ${i} "${image_name}" "${head_fabric_ip}" "${profile}"
+      ensure_container ${i} "${image_name}" "${head_fabric_ip}" "${profile:-unknown}"
     done
   fi
 
   Log "Containers ready. Use load-model to start cluster with model-specific Ray settings."
 }
 
+# ==============================================================================
+# cmd_load_model
+# ==============================================================================
 cmd_load_model() {
-  local profile=$1
-  
-  # Determine head node (first active node)
+  local profile
+  profile=$(resolve_favorite "${1:-}")
+  [[ -z "$profile" ]] && Die "load-model requires a profile name"
+
   local head_node=1
-  if [[ ${#ACTIVE_NODES[@]} -gt 0 ]]; then
-    head_node="${ACTIVE_NODES[0]}"
-    Log "Using node $head_node as Ray head (first active node)"
-  fi
-  
-  local node_ip=$(get_node_info $head_node lan_ip)
-  local head_fabric_ip=$(get_node_info $head_node fabric_ip)
-  
+  [[ ${#ACTIVE_NODES[@]} -gt 0 ]] && head_node="${ACTIVE_NODES[0]}"
+  Log "Using node $head_node as Ray head (first active node)"
+
+  local node_ip
+  node_ip=$(get_node_info $head_node lan_ip)
+  local head_fabric_ip
+  head_fabric_ip=$(get_node_info $head_node fabric_ip)
+  local container_name
+  container_name=$(container_name_for "${profile}" "${head_node}")
+
   Log "Loading model profile: ${profile}"
-  
-  # Parse model config
+
   local model_config="${MODELS[$profile]:-}"
-  [[ -n "${model_config}" ]] || { Log "ERROR: Unknown profile '${profile}'"; exit 1; }
-  
-  # Extract settings
-  local ray_store_gb=$(echo "$model_config" | grep RAY_OBJECT_STORE_GB | cut -d'=' -f2 | xargs)
-  local tp_size=$(echo "$model_config" | grep TENSOR_PARALLEL_SIZE | cut -d'=' -f2 | xargs)
-  local executor_backend=$(echo "$model_config" | grep CLUSTER_EXECUTOR_BACKEND | cut -d'=' -f2 | xargs)
-  
-  # Validate we have enough active nodes
-  if [[ ${#ACTIVE_NODES[@]} -gt 0 ]]; then
-    if [[ ${#ACTIVE_NODES[@]} -lt $tp_size ]]; then
-      Log "ERROR: Model requires ${tp_size} nodes, but only ${#ACTIVE_NODES[@]} active: ${ACTIVE_NODES[*]}"
-      exit 1
-    fi
+  [[ -n "${model_config}" ]] || Die "Unknown profile '${profile}'"
+
+  local ray_store_gb
+  ray_store_gb=$(echo "$model_config" | grep RAY_OBJECT_STORE_GB | cut -d'=' -f2 | xargs)
+  local tp_size
+  tp_size=$(echo "$model_config" | grep TENSOR_PARALLEL_SIZE | cut -d'=' -f2 | xargs)
+  local executor_backend
+  executor_backend=$(echo "$model_config" | grep CLUSTER_EXECUTOR_BACKEND | cut -d'=' -f2 | xargs)
+
+  if [[ ${#ACTIVE_NODES[@]} -gt 0 && ${#ACTIVE_NODES[@]} -lt $tp_size ]]; then
+    Die "Model requires ${tp_size} nodes, but only ${#ACTIVE_NODES[@]} active: ${ACTIVE_NODES[*]}"
   fi
-  
-  # Determine which nodes to use
+
   local nodes_to_use=()
   if [[ ${#ACTIVE_NODES[@]} -gt 0 ]]; then
     nodes_to_use=("${ACTIVE_NODES[@]:0:$tp_size}")
   else
-    for i in $(seq 1 ${tp_size}); do
-      nodes_to_use+=($i)
-    done
+    for i in $(seq 1 ${tp_size}); do nodes_to_use+=($i); done
   fi
-  
+
   Log "Using nodes: ${nodes_to_use[*]}"
   Log "Executor backend: ${executor_backend:-ray (default)}"
 
   if [[ "${tp_size}" -gt 1 && "${executor_backend}" != "mp" ]]; then
-    # Ray path: start Ray cluster before loading model
     Log "Starting Ray cluster (${tp_size} nodes, ${ray_store_gb}GB object store per node)"
     export RAY_OBJECT_STORE_GB="${ray_store_gb}"
 
-    # Drop page cache on all nodes before loading — NFS weight loading fills
-    # the kernel page cache aggressively; clearing it before init prevents
-    # RAM exhaustion during the Marlin weight prep phase.
     Log "Dropping page cache on all nodes before model load..."
     for node_num in "${nodes_to_use[@]}"; do
       local node_ip_i=$(get_node_info $node_num lan_ip)
       local node_name=$(get_node_info $node_num name)
-      (
-        ssh admin@${node_ip_i} "sync && echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null && echo '[${node_name}] page cache dropped'" 
-      ) &
+      (ssh admin@${node_ip_i} "sync && echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null && echo '[${node_name}] page cache dropped'") &
     done
     wait
     Log "Page cache drop complete"
 
-    # Start Ray on selected nodes (in parallel)
     for node_num in "${nodes_to_use[@]}"; do
       local node_name=$(get_node_info $node_num name)
       local node_ip_i=$(get_node_info $node_num lan_ip)
       local fabric_ip=$(get_node_info $node_num fabric_ip)
-
-      Log "Starting Ray on node ${node_num} (${node_name})"
+      local cname
+      cname=$(container_name_for "${profile}" "${node_num}")
+      Log "Starting Ray on node ${node_num} (${node_name}) in ${cname}"
       (
         ssh admin@${node_ip_i} "sudo docker exec \
           -e THIS_NODE=${node_num} \
           -e RAY_NODE_IP=${fabric_ip} \
           -e RAY_HEAD_IP=${head_fabric_ip} \
           -e RAY_OBJECT_STORE_GB=${ray_store_gb} \
-          vllm-node-${node_num} /opt/vllm_cluster.sh start-ray"
+          ${cname} /opt/vllm_cluster.sh start-ray"
       ) &
     done
-
-    # Wait for all Ray processes to finish starting
     wait
 
     Log "Waiting for Ray to stabilize..."
-    local ray_wait=0
-    local ray_max=30
+    local ray_wait=0 ray_max=30
     while [[ $ray_wait -lt $ray_max ]]; do
-      sleep 2
-      ray_wait=$((ray_wait + 2))
+      sleep 2; ray_wait=$((ray_wait + 2))
       local ray_ok
       ray_ok=$(ssh admin@${node_ip} \
-        "sudo docker exec vllm-node-${head_node} ray status 2>/dev/null | grep -c 'Active' || true")
+        "sudo docker exec ${container_name} ray status 2>/dev/null | grep -c 'Active' || true")
       if [[ "${ray_ok:-0}" -gt 0 ]]; then
-        Log "  Ray ready after ${ray_wait}s"
-        break
+        Log "  Ray ready after ${ray_wait}s"; break
       fi
       Log "  Waiting for Ray... (${ray_wait}s)"
     done
-    if [[ $ray_wait -ge $ray_max ]]; then
-      Log "  WARNING: Ray status check timed out — proceeding anyway"
-    fi
+    [[ $ray_wait -ge $ray_max ]] && Log "  WARNING: Ray status check timed out — proceeding anyway"
+
   elif [[ "${executor_backend}" == "mp" && "${tp_size}" -gt 1 ]]; then
     Log "mp executor: skipping Ray — launching vLLM on all nodes directly"
     Log "Dropping page cache on all nodes before model load..."
     for node_num in "${nodes_to_use[@]}"; do
       local node_ip_i=$(get_node_info $node_num lan_ip)
       local node_name=$(get_node_info $node_num name)
-      (
-        ssh admin@${node_ip_i} "sync && echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null && echo '[${node_name}] page cache dropped'"
-      ) &
+      (ssh admin@${node_ip_i} "sync && echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null && echo '[${node_name}] page cache dropped'") &
     done
     wait
     Log "Page cache drop complete"
   else
     Log "TP=1: skipping Ray — using multiproc executor"
   fi
-  
-  # Build env args for vLLM (profile vars already baked into container,
-  # but pass them again on exec for any that might be overridden)
-  # Ray path: inject RAY_HEAD_IP for IsHeadNode detection in mgr.sh
-  # mp path: omit RAY_HEAD_IP — not using Ray; VLLM_MASTER_ADDR is the rendezvous signal
-  local env_args=""
-  [[ "${executor_backend}" != "mp" ]] && env_args="-e RAY_HEAD_IP=${head_fabric_ip}"
-  while IFS='=' read -r key value; do
-    key=$(echo "$key" | xargs)
-    value=$(echo "$value" | xargs)
-    [[ -n "$key" && -n "$value" ]] && env_args="${env_args} -e ${key}=$(printf '%q' "${value}")"
-  done <<< "${model_config}"
-  
-  # Extract served name and port for log file paths and health checks
-  local served_name=$(echo "$model_config" | grep SERVED_MODEL_NAME | cut -d'=' -f2 | xargs)
-  local vllm_port=$(echo "$model_config" | grep "VLLM_API_PORT\|VLLM_PORT" | head -1 | cut -d'=' -f2 | xargs)
+
+  # Build env args (profile vars + cluster.env keys)
+  local env_args="${ENV_INJECT_ARGS}"
+  [[ "${executor_backend}" != "mp" ]] && env_args="${env_args} -e RAY_HEAD_IP=${head_fabric_ip}"
+  env_args="${env_args} $(profile_env_args "${model_config}")"
+
+  local served_name
+  served_name=$(echo "$model_config" | grep SERVED_MODEL_NAME | cut -d'=' -f2 | xargs)
+  local vllm_port
+  vllm_port=$(echo "$model_config" | grep -E "VLLM_API_PORT|VLLM_PORT" | head -1 | cut -d'=' -f2 | xargs)
   vllm_port="${vllm_port:-8000}"
   local log_file="/opt/ai-tools/logs/vllm-cluster/vllm_${served_name}_node${head_node}_latest.log"
 
-  # Truncate any stale log from previous runs of this model — prevents false
-  # error detection from matching errors left by prior failed attempts.
-  ssh admin@${node_ip} "sudo docker exec vllm-node-${head_node} truncate -s 0 ${log_file} 2>/dev/null || true"
+  ssh admin@${node_ip} "sudo docker exec ${container_name} truncate -s 0 ${log_file} 2>/dev/null || true"
 
   if [[ "${executor_backend}" == "mp" && "${tp_size}" -gt 1 ]]; then
-    # mp multi-node: launch vLLM on every node simultaneously.
-    # Each node gets --nnodes, --node-rank, --master-addr.
-    # Worker nodes (rank > 0) also get --headless (no API server).
-    # NOTE: node_rank is computed outside subshells — subshell isolation means
-    # variables incremented inside (...) & are not visible to the parent loop.
     local nnodes="${tp_size}"
     Log "Loading model on all nodes (mp, nnodes=${nnodes})..."
     local _mp_rank=0
@@ -385,7 +451,9 @@ cmd_load_model() {
       local headless_flag=0
       [[ $_mp_rank -gt 0 ]] && headless_flag=1
       local this_rank=$_mp_rank
-      Log "  Node ${node_num} (${node_name}) rank=${this_rank} headless=${headless_flag}"
+      local cname
+      cname=$(container_name_for "${profile}" "${node_num}")
+      Log "  Node ${node_num} (${node_name}) rank=${this_rank} headless=${headless_flag} → ${cname}"
       (
         ssh admin@${node_ip_i} "sudo docker exec \
           ${env_args} \
@@ -393,103 +461,99 @@ cmd_load_model() {
           -e VLLM_NODE_RANK=${this_rank} \
           -e VLLM_MASTER_ADDR=${head_fabric_ip} \
           -e VLLM_HEADLESS=${headless_flag} \
-          vllm-node-${node_num} /opt/vllm_cluster.sh load-model"
+          ${cname} /opt/vllm_cluster.sh load-model"
       ) &
       _mp_rank=$((_mp_rank + 1))
     done
-    # Don't wait — all nodes block until rendezvous; poll head for readiness below
   else
-    Log "Loading model on head node ${head_node}..."
-    ssh admin@${node_ip} "sudo docker exec ${env_args} vllm-node-${head_node} /opt/vllm_cluster.sh load-model"
+    Log "Loading model on head node ${head_node} (${container_name})..."
+    ssh admin@${node_ip} "sudo docker exec ${env_args} ${container_name} /opt/vllm_cluster.sh load-model"
   fi
 
-  
-  # Post-launch verification: poll for signs of life
-  
-  Log "Waiting for vLLM to initialize..."
-  local max_wait=900  # 15 minutes max (NFS weight loading + CUDA graph compilation)
-  local elapsed=0
-  local stage="starting"
-  local cache_drop_15_25_done=false
-  local cache_drop_35_45_done=false
-  local cache_drop_55_65_done=false
-  local cache_drop_75_85_done=false
-  local cache_drop_90_done=false
+  _wait_for_vllm "${node_ip}" "${container_name}" "${vllm_port}" "${log_file}" "${nodes_to_use[@]}"
+}
 
-  # Helper: drop page cache on all nodes in parallel
-  drop_page_cache_all_nodes() {
-    local reason="$1"
-    Log "  Dropping page cache on all nodes (${reason})..."
-    for n in "${nodes_to_use[@]}"; do
-      local nip=$(get_node_info $n lan_ip)
-      (ssh admin@${nip} "sync && echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null && echo '[node${n}] cache dropped'" 2>/dev/null || true) &
-    done
-    wait
-  }
-  
+# ==============================================================================
+# _drop_page_cache_on_nodes (internal helper — top-level so bash allows it)
+# ==============================================================================
+# Args: reason node1 node2 ...
+_drop_page_cache_on_nodes() {
+  local reason="$1"; shift
+  local nodes_to_drop=("$@")
+  Log "  Dropping page cache on all nodes (${reason})..."
+  for n in "${nodes_to_drop[@]}"; do
+    local nip
+    nip=$(get_node_info $n lan_ip)
+    (ssh admin@${nip} "sync && echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null && echo '[node${n}] cache dropped'" 2>/dev/null || true) &
+  done
+  wait
+}
+
+# ==============================================================================
+# _wait_for_vllm (internal)
+# ==============================================================================
+_wait_for_vllm() {
+  local node_ip="$1"
+  local container_name="$2"
+  local vllm_port="$3"
+  local log_file="$4"
+  shift 4
+  local nodes_to_use=("$@")
+
+  Log "Waiting for vLLM to initialize..."
+  local max_wait=900 elapsed=0 stage="starting"
+  local cache_drop_15_25_done=false cache_drop_35_45_done=false
+  local cache_drop_55_65_done=false cache_drop_75_85_done=false cache_drop_90_done=false
+
   while [[ $elapsed -lt $max_wait ]]; do
-    sleep 10
-    elapsed=$((elapsed + 10))
-    
-    # Check if process is still alive
+    sleep 10; elapsed=$((elapsed + 10))
+
     local proc_check
-    proc_check=$(ssh admin@${node_ip} "sudo docker exec vllm-node-${head_node} cat /opt/ai-tools/run/vllm-cluster/vllm_api.pid 2>/dev/null" || true)
+    proc_check=$(ssh admin@${node_ip} "sudo docker exec ${container_name} cat /opt/ai-tools/run/vllm-cluster/vllm_api.pid 2>/dev/null" || true)
     if [[ -z "$proc_check" ]]; then
-      Log "  [${elapsed}s] WARNING: No PID file found — load-model may have failed"
+      Log "  [${elapsed}s] WARNING: No PID file — load-model may have failed"
       Log "  Check: ssh admin@${node_ip} 'tail -30 ${log_file}'"
       return 1
     fi
-    
-    # Check for fatal errors in log
+
     local errors
-    errors=$(ssh admin@${node_ip} "sudo docker exec vllm-node-${head_node} grep -c 'EngineCore failed to start' ${log_file} 2>/dev/null" || echo "0")
+    errors=$(ssh admin@${node_ip} "sudo docker exec ${container_name} grep -c 'EngineCore failed to start' ${log_file} 2>/dev/null" || echo "0")
     errors=$(echo "$errors" | tr -d '\n')
     if [[ "$errors" -gt 0 ]]; then
       Log "  [${elapsed}s] FAILED: Errors detected in log"
       Log "  Check: ssh admin@${node_ip} 'grep -A5 \"EngineCore failed\" ${log_file} | tail -20'"
       return 1
     fi
-    
-    # Try health endpoint
+
     local health
     health=$(curl -sf --connect-timeout 2 --max-time 5 "http://${node_ip}:${vllm_port}/health" 2>/dev/null || true)
     if [[ -n "$health" ]]; then
       Log "  [${elapsed}s] READY — vLLM responding on port ${vllm_port}"
-      
-      # Show model name
       local models
-      models=$(curl -sf "http://${node_ip}:${vllm_port}/v1/models" 2>/dev/null | python3 -c "import sys,json; [print(m['id']) for m in json.load(sys.stdin).get('data',[])]" 2>/dev/null || true)
-      if [[ -n "$models" ]]; then
-        Log "  Serving: ${models}"
-      fi
+      models=$(curl -sf "http://${node_ip}:${vllm_port}/v1/models" 2>/dev/null \
+        | python3 -c "import sys,json; [print(m['id']) for m in json.load(sys.stdin).get('data',[])]" 2>/dev/null || true)
+      [[ -n "$models" ]] && Log "  Serving: ${models}"
       return 0
     fi
-    
-    # Detect stage from log
+
     local log_tail
-    log_tail=$(ssh admin@${node_ip} "sudo docker exec vllm-node-${head_node} tail -3 ${log_file} 2>/dev/null" || true)
-    
+    log_tail=$(ssh admin@${node_ip} "sudo docker exec ${container_name} tail -3 ${log_file} 2>/dev/null" || true)
+
     if echo "$log_tail" | grep -q "Loading safetensors"; then
       stage="loading weights"
-      # Extract completion percentage and drop cache at five windows (tighter spacing for TP=2 heavier per-node load)
       local pct
       pct=$(echo "$log_tail" | grep -o '[0-9]\+%' | tail -1 | tr -d '%\n' || echo "0")
       if [[ -n "$pct" && "$pct" =~ ^[0-9]+$ ]]; then
-        if [[ "$pct" -ge 15 && "$pct" -le 25 && "$cache_drop_15_25_done" == false ]]; then
-          cache_drop_15_25_done=true
-          drop_page_cache_all_nodes "${pct}% loaded"
-        elif [[ "$pct" -ge 35 && "$pct" -le 45 && "$cache_drop_35_45_done" == false ]]; then
-          cache_drop_35_45_done=true
-          drop_page_cache_all_nodes "${pct}% loaded"
-        elif [[ "$pct" -ge 55 && "$pct" -le 65 && "$cache_drop_55_65_done" == false ]]; then
-          cache_drop_55_65_done=true
-          drop_page_cache_all_nodes "${pct}% loaded"
-        elif [[ "$pct" -ge 75 && "$pct" -le 85 && "$cache_drop_75_85_done" == false ]]; then
-          cache_drop_75_85_done=true
-          drop_page_cache_all_nodes "${pct}% loaded"
-        elif [[ "$pct" -ge 90 && "$cache_drop_90_done" == false ]]; then
-          cache_drop_90_done=true
-          drop_page_cache_all_nodes "${pct}% loaded"
+        if   [[ "$pct" -ge 15 && "$pct" -le 25 ]] && [[ "$cache_drop_15_25_done" == false ]]; then
+          cache_drop_15_25_done=true; _drop_page_cache_on_nodes "${pct}% loaded" "${nodes_to_use[@]}"
+        elif [[ "$pct" -ge 35 && "$pct" -le 45 ]] && [[ "$cache_drop_35_45_done" == false ]]; then
+          cache_drop_35_45_done=true; _drop_page_cache_on_nodes "${pct}% loaded" "${nodes_to_use[@]}"
+        elif [[ "$pct" -ge 55 && "$pct" -le 65 ]] && [[ "$cache_drop_55_65_done" == false ]]; then
+          cache_drop_55_65_done=true; _drop_page_cache_on_nodes "${pct}% loaded" "${nodes_to_use[@]}"
+        elif [[ "$pct" -ge 75 && "$pct" -le 85 ]] && [[ "$cache_drop_75_85_done" == false ]]; then
+          cache_drop_75_85_done=true; _drop_page_cache_on_nodes "${pct}% loaded" "${nodes_to_use[@]}"
+        elif [[ "$pct" -ge 90 ]] && [[ "$cache_drop_90_done" == false ]]; then
+          cache_drop_90_done=true; _drop_page_cache_on_nodes "${pct}% loaded" "${nodes_to_use[@]}"
         fi
       fi
     elif echo "$log_tail" | grep -q "torch.compile\|compile"; then
@@ -499,108 +563,244 @@ cmd_load_model() {
     elif echo "$log_tail" | grep -q "Starting vLLM\|Application startup"; then
       stage="starting API server"
     fi
-    
+
     Log "  [${elapsed}s] ${stage}..."
   done
-  
+
   Log "  [${elapsed}s] TIMEOUT — vLLM did not become ready in ${max_wait}s"
   Log "  Check: ssh admin@${node_ip} 'tail -50 ${log_file}'"
   return 1
 }
 
-cmd_stop_model() {
-  local head_node=1
+# ==============================================================================
+# cmd_stop_cluster
+# ==============================================================================
+# Two modes:
+#   No PROFILE → kill ALL managed containers on selected nodes (nuclear, safe default)
+#   PROFILE given → kill only containers matching that profile (surgical)
+#
+# "Managed container" = any container with label cluster.service set.
+# This means legacy containers named vllm-node-N (from before this scheme) are
+# NOT touched by surgical stop — they have no labels. Use nuclear stop (no profile)
+# to clean those up during migration.
+
+cmd_stop_cluster() {
+  local profile="${1:-}"
+  [[ -n "$profile" ]] && profile=$(resolve_favorite "$profile")
+
+  local nodes_to_stop=()
   if [[ ${#ACTIVE_NODES[@]} -gt 0 ]]; then
-    head_node="${ACTIVE_NODES[0]}"
+    nodes_to_stop=("${ACTIVE_NODES[@]}")
+  else
+    nodes_to_stop=(1 2 3 4)
   fi
-  
-  local node_ip=$(get_node_info $head_node lan_ip)
-  Log "Stopping model on head node ${head_node}"
-  ssh admin@${node_ip} "sudo docker exec vllm-node-${head_node} /opt/vllm_cluster.sh stop-model"
+
+  if [[ -n "$profile" ]]; then
+    # ── Surgical: only containers for this profile ──────────────────────────
+    Log "=== Surgical stop: profile '${profile}' on nodes ${nodes_to_stop[*]} ==="
+
+    # Phase 1: gracefully stop Ray/vLLM inside each matching container
+    Log "Phase 1: stopping Ray/vLLM inside profile containers..."
+    for node in "${nodes_to_stop[@]}"; do
+      local ip
+      ip=$(get_node_info $node lan_ip)
+      local cname
+      cname=$(container_name_for "${profile}" "${node}")
+      (
+        ssh admin@${ip} \
+          "sudo docker exec ${cname} /opt/vllm_cluster.sh stop-all 2>/dev/null || true" \
+          2>/dev/null || true
+      ) &
+    done
+    wait
+    Log "  Ray/vLLM stop complete (or containers already gone)"
+
+    # Phase 2: remove matching containers
+    Log "Phase 2: removing containers..."
+    for node in "${nodes_to_stop[@]}"; do
+      local ip
+      ip=$(get_node_info $node lan_ip)
+      local cname
+      cname=$(container_name_for "${profile}" "${node}")
+      ssh admin@${ip} "sudo docker rm -f ${cname} 2>/dev/null || true" &
+    done
+    wait
+    Log "Surgical stop complete: ${profile}"
+
+  else
+    # ── Nuclear: all managed containers on selected nodes ───────────────────
+    Log "=== Nuclear stop: all managed containers on nodes ${nodes_to_stop[*]} ==="
+
+    # Phase 1: gracefully stop Ray/vLLM inside every managed container
+    Log "Phase 1: stopping Ray/vLLM inside all managed containers..."
+    for node in "${nodes_to_stop[@]}"; do
+      local ip
+      ip=$(get_node_info $node lan_ip)
+      (
+        # Find all containers with cluster.service label on this node
+        local cnames
+        cnames=$(ssh admin@${ip} \
+          "sudo docker ps -a --filter 'label=cluster.service' --format '{{.Names}}'" 2>/dev/null || true)
+        if [[ -n "$cnames" ]]; then
+          while IFS= read -r cname; do
+            [[ -z "$cname" ]] && continue
+            ssh admin@${ip} \
+              "sudo docker exec ${cname} /opt/vllm_cluster.sh stop-all 2>/dev/null || true" \
+              2>/dev/null || true
+          done <<< "$cnames"
+        fi
+        # Also kill any legacy vllm-node-N containers (pre-rename-scheme migration)
+        ssh admin@${ip} \
+          "sudo docker rm -f vllm-node-${node} 2>/dev/null || true" \
+          2>/dev/null || true
+      ) &
+    done
+    wait
+    Log "  Ray/vLLM stop complete"
+
+    # Phase 2: remove all managed containers
+    Log "Phase 2: removing all managed containers..."
+    for node in "${nodes_to_stop[@]}"; do
+      local ip
+      ip=$(get_node_info $node lan_ip)
+      (
+        local cnames
+        cnames=$(ssh admin@${ip} \
+          "sudo docker ps -a --filter 'label=cluster.service' --format '{{.Names}}'" 2>/dev/null || true)
+        if [[ -n "$cnames" ]]; then
+          while IFS= read -r cname; do
+            [[ -z "$cname" ]] && continue
+            ssh admin@${ip} "sudo docker rm -f ${cname} 2>/dev/null || true"
+          done <<< "$cnames"
+        fi
+      ) &
+    done
+    wait
+    Log "Nuclear stop complete."
+  fi
 }
 
+# ==============================================================================
+# cmd_stop_model (unload model, keep containers + Ray)
+# ==============================================================================
+cmd_stop_model() {
+  local profile="${1:-}"
+  [[ -n "$profile" ]] && profile=$(resolve_favorite "$profile")
+
+  local head_node=1
+  [[ ${#ACTIVE_NODES[@]} -gt 0 ]] && head_node="${ACTIVE_NODES[0]}"
+
+  local node_ip
+  node_ip=$(get_node_info $head_node lan_ip)
+
+  if [[ -n "$profile" ]]; then
+    local cname
+    cname=$(container_name_for "${profile}" "${head_node}")
+    Log "Stopping model in ${cname} (node ${head_node})"
+    ssh admin@${node_ip} "sudo docker exec ${cname} /opt/vllm_cluster.sh stop-model"
+  else
+    # No profile: stop model in every managed container on head node
+    Log "Stopping model in all managed containers on node ${head_node}"
+    local cnames
+    cnames=$(ssh admin@${node_ip} \
+      "sudo docker ps --filter 'label=cluster.service' --format '{{.Names}}'" 2>/dev/null || true)
+    if [[ -n "$cnames" ]]; then
+      while IFS= read -r cname; do
+        [[ -z "$cname" ]] && continue
+        Log "  Stopping model in ${cname}"
+        ssh admin@${node_ip} "sudo docker exec ${cname} /opt/vllm_cluster.sh stop-model 2>/dev/null || true"
+      done <<< "$cnames"
+    else
+      Log "  No managed containers found on node ${head_node}"
+    fi
+  fi
+}
+
+# ==============================================================================
+# cmd_status
+# ==============================================================================
 cmd_status() {
   Log "=== Cluster Container Status ==="
   for node_num in 1 2 3 4; do
     is_node_active $node_num || continue
-    local node_ip=$(get_node_info $node_num lan_ip)
-    local node_name=$(get_node_info $node_num name)
-    local status
-    status=$(ssh admin@${node_ip} "sudo docker ps --filter name=vllm-node-${node_num} --format '{{.Label \"vllm.profile\"}} ({{.Label \"vllm.served_name\"}}) {{.Image}} {{.Status}}'" 2>/dev/null)
-    if [[ -n "$status" ]]; then
-      Log "  Node ${node_num} (${node_name}): ${status}"
+    local node_ip
+    node_ip=$(get_node_info $node_num lan_ip)
+    local node_name
+    node_name=$(get_node_info $node_num name)
+
+    # Query by label — works regardless of container name scheme
+    local containers
+    containers=$(ssh admin@${node_ip} \
+      "sudo docker ps --filter 'label=cluster.service' \
+       --format 'table {{.Names}}\t{{.Label \"cluster.profile\"}}\t{{.Label \"cluster.served_name\"}}\t{{.Image}}\t{{.Status}}'" \
+      2>/dev/null || true)
+
+    if [[ -n "$containers" ]]; then
+      Log "  Node ${node_num} (${node_name}):"
+      while IFS= read -r line; do
+        [[ -z "$line" || "$line" == NAMES* ]] && continue
+        Log "    ${line}"
+      done <<< "$containers"
     else
-      Log "  Node ${node_num} (${node_name}): no container"
+      Log "  Node ${node_num} (${node_name}): no managed containers"
     fi
   done
 
-  # Also show Ray/vLLM internal status from head node
+  # Ray status from head node
   local head_node=1
-  if [[ ${#ACTIVE_NODES[@]} -gt 0 ]]; then
-    head_node="${ACTIVE_NODES[0]}"
-  fi
-  local head_ip=$(get_node_info $head_node lan_ip)
+  [[ ${#ACTIVE_NODES[@]} -gt 0 ]] && head_node="${ACTIVE_NODES[0]}"
+  local head_ip
+  head_ip=$(get_node_info $head_node lan_ip)
+
   Log "=== Ray Status (from node ${head_node}) ==="
-  ssh admin@${head_ip} "sudo docker exec vllm-node-${head_node} /opt/vllm_cluster.sh status" 2>/dev/null || Log "  (no running container on head node)"
-}
+  # Try to find any managed container on head node to exec into
+  local head_cname
+  head_cname=$(ssh admin@${head_ip} \
+    "sudo docker ps --filter 'label=cluster.service' --format '{{.Names}}' | head -1" 2>/dev/null || true)
 
-cmd_stop_cluster() {
-  local nodes_to_stop=()
-  if [[ ${#ACTIVE_NODES[@]} -gt 0 ]]; then
-    Log "Stopping nodes: ${ACTIVE_NODES[*]}"
-    nodes_to_stop=("${ACTIVE_NODES[@]}")
+  if [[ -n "$head_cname" ]]; then
+    ssh admin@${head_ip} "sudo docker exec ${head_cname} /opt/vllm_cluster.sh status" 2>/dev/null \
+      || Log "  (status call failed inside container)"
   else
-    Log "Stopping all nodes"
-    nodes_to_stop=(1 2 3 4)
+    Log "  (no running managed container on head node)"
   fi
-
-  # Phase 1: gracefully stop Ray + vLLM inside each container
-  Log "Phase 1: stopping Ray/vLLM inside containers..."
-  for node in "${nodes_to_stop[@]}"; do
-    local ip=$(get_node_info $node lan_ip)
-    (
-      ssh admin@${ip} \
-        "sudo docker exec vllm-node-${node} /opt/vllm_cluster.sh stop-all 2>/dev/null || true" \
-        2>/dev/null || true
-    ) &
-  done
-  wait
-  Log "  Ray/vLLM stop complete (or containers already gone)"
-
-  # Phase 2: remove containers
-  Log "Phase 2: removing containers..."
-  for node in "${nodes_to_stop[@]}"; do
-    local ip=$(get_node_info $node lan_ip)
-    ssh admin@${ip} "sudo docker rm -f vllm-node-${node} 2>/dev/null || true" &
-  done
-  wait
-  Log "Cluster stopped."
 }
 
-# Known vLLM API ports to probe
-VLLM_PROBE_PORTS=(8000 8001 8002 8010)
+# ==============================================================================
+# cmd_details
+# ==============================================================================
+VLLM_PROBE_PORTS=(8000 8001 8002 8010 8011)
 
 cmd_details() {
   Log "=== Cluster Details (probing API endpoints) ==="
   for node_num in 1 2 3 4; do
     is_node_active $node_num || continue
-    local node_ip=$(get_node_info $node_num lan_ip)
-    local node_name=$(get_node_info $node_num name)
+    local node_ip
+    node_ip=$(get_node_info $node_num lan_ip)
+    local node_name
+    node_name=$(get_node_info $node_num name)
 
-    # Check container labels first
-    local container_info
-    container_info=$(ssh admin@${node_ip} "sudo docker ps --filter name=vllm-node-${node_num} --format '{{.Label \"vllm.profile\"}}'" 2>/dev/null)
-    if [[ -z "$container_info" ]]; then
-      Log "  Node ${node_num} (${node_name}): no container"
+    local containers
+    containers=$(ssh admin@${node_ip} \
+      "sudo docker ps --filter 'label=cluster.service' --format '{{.Names}}|{{.Label \"cluster.profile\"}}'" \
+      2>/dev/null || true)
+
+    if [[ -z "$containers" ]]; then
+      Log "  Node ${node_num} (${node_name}): no managed containers"
       continue
     fi
 
-    Log "  Node ${node_num} (${node_name}) [profile: ${container_info}]:"
+    Log "  Node ${node_num} (${node_name}):"
+    while IFS='|' read -r cname cprofile; do
+      [[ -z "$cname" ]] && continue
+      Log "    Container: ${cname} (profile: ${cprofile})"
+    done <<< "$containers"
 
     local found_any=0
     for port in "${VLLM_PROBE_PORTS[@]}"; do
       local response
-      response=$(curl -s --connect-timeout 2 --max-time 5 "http://${node_ip}:${port}/v1/models" 2>/dev/null)
+      response=$(curl -s --connect-timeout 2 --max-time 5 \
+        "http://${node_ip}:${port}/v1/models" 2>/dev/null)
       if [[ -n "$response" ]] && echo "$response" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
         local model_ids
         model_ids=$(echo "$response" | python3 -c "
@@ -617,37 +817,77 @@ for m in data.get('data', []):
         fi
       fi
     done
-
-    if [[ $found_any -eq 0 ]]; then
-      Log "    (container running, no API responding on ports ${VLLM_PROBE_PORTS[*]})"
-    fi
+    [[ $found_any -eq 0 ]] && Log "    (containers running, no API on ports ${VLLM_PROBE_PORTS[*]})"
   done
 }
 
-# Parse arguments
+# ==============================================================================
+# cmd_fav
+# ==============================================================================
+cmd_fav() {
+  local arg="${1:-list}"
+
+  if [[ "$arg" == "list" ]]; then
+    echo ""
+    echo "=== Favorite Aliases ==="
+    if [[ ${#FAVORITES[@]} -eq 0 ]]; then
+      echo "  (none defined — edit cluster_favorites.sh)"
+    else
+      # Sort by key for readability
+      for key in $(echo "${!FAVORITES[@]}" | tr ' ' '\n' | sort); do
+        printf "  %-20s → %s\n" "$key" "${FAVORITES[$key]}"
+      done
+    fi
+
+    echo ""
+    echo "=== Sequences ==="
+    if [[ ${#SEQUENCES[@]} -eq 0 ]]; then
+      echo "  (none defined — edit cluster_favorites.sh)"
+    else
+      for key in $(echo "${!SEQUENCES[@]}" | tr ' ' '\n' | sort); do
+        local entry="${SEQUENCES[$key]}"
+        local desc
+        desc=$(echo "$entry" | cut -d'|' -f2)
+        printf "  %-20s %s\n" "$key" "$desc"
+      done
+    fi
+    echo ""
+    return 0
+  fi
+
+  # Check if it's a sequence first
+  if is_sequence "$arg"; then
+    run_sequence "$arg"
+    return $?
+  fi
+
+  # Otherwise treat as profile alias — print the expansion and exit
+  # (actual execution is left to the caller to re-invoke with the expanded name,
+  #  OR the user can use it inline: ./orchestrator.sh load-model $(./orchestrator.sh fav ds4))
+  local expanded
+  expanded=$(resolve_favorite "$arg")
+  if [[ "$expanded" == "$arg" ]]; then
+    Die "Unknown favorite or sequence: '${arg}'. Run 'fav list' to see options."
+  fi
+  echo "$expanded"
+}
+
+# ==============================================================================
+# Argument parsing + dispatch
+# ==============================================================================
 COMMAND=""
 ARGS=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --help|-h)
-      COMMAND="help"
-      shift
-      ;;
+      COMMAND="help"; shift ;;
     --nodes)
-      parse_node_filter "$2"
-      shift 2
-      ;;
-    start-cluster|load-model|unload-model|stop-model|status|details|stop-cluster)
-      COMMAND="$1"
-      shift
-      ARGS=("$@")
-      break
-      ;;
+      parse_node_filter "$2"; shift 2 ;;
+    start-cluster|load-model|unload-model|stop-model|stop-cluster|status|details|fav)
+      COMMAND="$1"; shift; ARGS=("$@"); break ;;
     *)
-      echo "Unknown argument: $1"
-      exit 1
-      ;;
+      Die "Unknown argument: $1" ;;
   esac
 done
 
@@ -656,56 +896,74 @@ if [[ -z "$COMMAND" || "$COMMAND" == "help" ]]; then
 Usage: ./vllm_cluster_orchestrator.sh [--nodes N,M,...] <command> [args]
 
 Commands:
-  start-cluster PROFILE      - Start cluster; infer node count from profile TP size
-  start-cluster N            - Start N bare containers (no profile)
-  start-cluster N PROFILE    - Start N-node cluster (explicit override)
-  load-model PROFILE         - Load model from cluster_config.sh
-  unload-model               - Unload model (keep Ray + containers)
-  status                     - Show cluster container status + Ray info
-  details                    - Probe API endpoints, show served model names per node/port
-  stop-cluster               - Stop all containers
+  start-cluster [PROFILE]      Start containers; infer node count from profile TP
+  start-cluster N [PROFILE]    Start N containers (explicit node count)
+  load-model PROFILE           Load model into running containers
+  unload-model [PROFILE]       Unload model (keep Ray + containers)
+  stop-cluster                 Stop ALL managed containers on selected nodes
+  stop-cluster PROFILE         Surgical: stop only containers for this profile
+  status                       Show container status + Ray info
+  details                      Probe API endpoints, show served model names
+  fav list                     List aliases and sequences
+  fav <name>                   Run a sequence or print expanded alias
 
 Node Filtering:
-  --nodes 1,2        - Only use nodes 1 and 2
-  --nodes 3          - Single node deployment
+  --nodes 1,2        Only use nodes 1 and 2
+  --nodes 3          Single node
 
-Profiles:
-  qwen3.5-122b-v2            - PRODUCTION: Albond hybrid + MTP-2, TP=1, 29-44 tok/s
-  qwen3.5-122b               - Fallback: eugr image, TP=2, cyankiwi model, 22 tok/s
-  qwen3.5-397b-autoround     - Heavy: TP=2, AutoRound, NAS (vllm-sm121-397b)
-  qwen3.5-397b-autoround-tp4 - Heavy: TP=4, AutoRound, NAS (vllm-sm121-397b)
-  minimax-m2.7               - 229B MoE: TP=4, NAS (vllm-sm121)
-  minimax-m2.7-tp2           - 229B MoE: TP=2, NAS (vllm-sm121), 32-35 tok/s
-  glm-4.7                    - 355B MoE: TP=4, local SSD (vllm-sm121)
-  qwen3.5-9b                 - Vision: TP=1, port 8002, cohabits
+Profiles (shortcut aliases in cluster_favorites.sh):
+  ds4                deepseek-v4-flash          (TP=4, all nodes)
+  ds4-tp2            deepseek-v4-flash-tp2      (TP=2, 2 nodes)
+  glm                glm-4.7                    (TP=4, all nodes)
+  q122               qwen3.5-122b-tp1-cust      (TP=1 per node)
+  q397               qwen3.5-397b-autoround     (TP=2, 2 nodes)
+  mm                 minimax-m2.7               (TP=4)
+  mm-tp2             minimax-m2.7-tp2           (TP=2)
+  q9b-bf16           qwen3.5-9b-bf16            (TP=1, cohabits)
+
+Sequences (run with: fav <name>):
+  ds4-up             Stop all → start DeepSeek V4 Flash TP=4
+  ds4-tp2-up         Stop 3,4 → start DeepSeek V4 Flash TP=2
+  glm-up             Stop all → start GLM-4.7 TP=4
+  q122-prod          Stop 1,2 → start 122B TP=1 on each
+  q397-heavy         Stop 1,2 → start 397B TP=2 on nodes 1+2
+  mm-tp2             Stop 3,4 → start MiniMax TP=2
 
 Examples:
-  # MiniMax on 2 nodes (TP inferred from profile)
-  ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster minimax-m2.7-tp2
-  ./vllm_cluster_orchestrator.sh --nodes 3,4 load-model minimax-m2.7-tp2
+  # Full sequence via fav:
+  ./vllm_cluster_orchestrator.sh fav ds4-up
 
-  # Production 122B: two independent TP=1 nodes behind HAProxy
-  ./vllm_cluster_orchestrator.sh --nodes 1 start-cluster qwen3.5-122b-v2
-  ./vllm_cluster_orchestrator.sh --nodes 1 load-model qwen3.5-122b-v2
-  ./vllm_cluster_orchestrator.sh --nodes 2 start-cluster qwen3.5-122b-v2
-  ./vllm_cluster_orchestrator.sh --nodes 2 load-model qwen3.5-122b-v2
+  # Manual equivalent:
+  ./vllm_cluster_orchestrator.sh --nodes 1,2,3,4 start-cluster deepseek-v4-flash
+  ./vllm_cluster_orchestrator.sh --nodes 1,2,3,4 load-model deepseek-v4-flash
 
-  # GLM-4.7 (TP=4 inferred, all nodes)
-  ./vllm_cluster_orchestrator.sh --nodes 1,2,3,4 start-cluster glm-4.7
-  ./vllm_cluster_orchestrator.sh --nodes 1,2,3,4 load-model glm-4.7
+  # Co-habitation: 122B on node 1, 9B also on node 1
+  ./vllm_cluster_orchestrator.sh --nodes 1 start-cluster qwen3.5-122b-tp1-cust
+  ./vllm_cluster_orchestrator.sh --nodes 1 load-model qwen3.5-122b-tp1-cust
+  ./vllm_cluster_orchestrator.sh --nodes 1 start-cluster qwen3.5-9b-bf16
+  ./vllm_cluster_orchestrator.sh --nodes 1 load-model qwen3.5-9b-bf16
 
-  # Unload model, keep containers
-  ./vllm_cluster_orchestrator.sh --nodes 3,4 unload-model
+  # Surgical stop — only kills the 9B, leaves 122B running:
+  ./vllm_cluster_orchestrator.sh --nodes 1 stop-cluster qwen3.5-9b-bf16
+
+  # Nuclear stop — kills everything on nodes 1 and 2:
+  ./vllm_cluster_orchestrator.sh --nodes 1,2 stop-cluster
+
+  # Using an alias:
+  ./vllm_cluster_orchestrator.sh --nodes 1 load-model q122
 USAGE
   [[ "$COMMAND" == "help" ]] && exit 0 || exit 1
 fi
 
 case "$COMMAND" in
-  help) : ;;  # already handled above
+  help)          : ;;
   start-cluster) cmd_start_cluster "${ARGS[0]:-}" "${ARGS[1]:-}" ;;
-  load-model) cmd_load_model "${ARGS[0]}" ;;
-  unload-model|stop-model) cmd_stop_model ;;
-  status) cmd_status ;;
-  details) cmd_details ;;
-  stop-cluster) cmd_stop_cluster ;;
+  load-model)    cmd_load_model "${ARGS[0]:-}" ;;
+  unload-model|stop-model)
+                 cmd_stop_model "${ARGS[0]:-}" ;;
+  stop-cluster)  cmd_stop_cluster "${ARGS[0]:-}" ;;
+  status)        cmd_status ;;
+  details)       cmd_details ;;
+  fav)           cmd_fav "${ARGS[0]:-list}" ;;
 esac
+
