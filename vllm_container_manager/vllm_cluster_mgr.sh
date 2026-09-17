@@ -294,7 +294,7 @@ StartRayWorker() {
 # ==============================================================================
 BuildVLLMArgs() {
   local args=(
-    "${VLLM_PYTHON_BIN}" -m vllm.entrypoints.openai.api_server
+    "${VLLM_PYTHON_BIN}" -m vllm.entrypoints.cli.main serve
     --model "${MODEL_DIR}"
     --host "${VLLM_HOST}"
     --port "${VLLM_API_PORT}"
