@@ -41,6 +41,7 @@ declare -A CUSTOM_IMAGES=(
   [vllm-eugr-0.22.0]="192.168.2.42:5000/vllm-eugr-0.22.0:2026-06-04_b01"
   [vllm-jasl-ds4]="192.168.2.42:5000/vllm-jasl-ds4:2026-06-05_b01"
   [vllm-pasta]="192.168.2.42:5000/vllm-pasta:2026-06-12_b03"
+  [vllm-eugr-glm52-vis]="10.10.10.1:5000/vllm-eugr-glm52-vis:2026-09-17_b01"
 )
 
 # Images that require a specific entrypoint (NGC-based images need their setup script)
@@ -234,6 +235,50 @@ declare -A MODELS=(
 	SPECULATIVE_METHOD=deepseek_mtp
 	NUM_SPECULATIVE_TOKENS=2
   "
+
+  [glm-5.2-quanttrio-vision]="
+  DOCKER_IMAGE=vllm-eugr-glm52-vis
+  MODEL_DIR=/opt/ai-models/hf/glm52-quanttrio-vision
+  SERVED_MODEL_NAME=vision,vision-glm,glm-5.2-quanttrio-vision
+  TENSOR_PARALLEL_SIZE=4
+  CLUSTER_EXECUTOR_BACKEND=mp
+  MAX_MODEL_LEN=290816
+  MAX_NUM_SEQS=1
+  MAX_NUM_BATCHED_TOKENS=4096
+  GPU_MEMORY_UTILIZATION=0.90
+  ENABLE_PREFIX_CACHING=1
+  TRUST_REMOTE_CODE=1
+  ENABLE_AUTO_TOOL_CHOICE=1
+  TOOL_CALL_PARSER=glm47
+  REASONING_PARSER=glm45
+  KV_CACHE_DTYPE=fp8_ds_mla
+  DTYPE=bfloat16
+  TORCH_CUDA_ARCH_LIST=12.1a
+  HF_HUB_OFFLINE=1
+  VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
+  VLLM_API_PORT=8210
+  VLLM_MASTER_PORT=29502
+  ENFORCE_EAGER=0
+  VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=1800
+  VLLM_LOGGING_LEVEL=INFO
+  GLM52_BIND_HOST_TRITON=0
+  VLLM_USE_B12X_SPARSE_INDEXER=1
+  VLLM_USE_V2_MODEL_RUNNER=1
+  VLLM_DCP_GLOBAL_TOPK=1
+  VLLM_DCP_SHARD_DRAFT=1
+  VLLM_MARLIN_USE_ATOMIC_ADD=1
+  VLLM_ADAPTIVE_SPEC_DEPTHS=2,4,5
+  VLLM_MTP_INSTRUMENT=1
+  VLLM_MTP_INSTRUMENT_WINDOW=32
+  VLLM_B12X_MLA_SPEC_EXTEND_AS_DECODE=1
+  NCCL_NET=IB
+  NCCL_IB_GID_INDEX=3
+  NCCL_CROSS_NIC=1
+  NCCL_CUMEM_ENABLE=0
+  NCCL_IGNORE_CPU_AFFINITY=1
+  COMPILATION_CONFIG={\"cudagraph_mode\":\"FULL\",\"max_cudagraph_capture_size\":10}
+  VLLM_EXTRA_ARGS=--decode-context-parallel-size 2 --dcp-kv-cache-interleave-size 1 --attention-backend B12X_MLA_SPARSE --hf-overrides {\"index_topk_pattern\":\"FFFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSS\"} --limit-mm-per-prompt {\"image\":1,\"video\":0} --mm-processor-cache-gb 0 --mm-encoder-tp-mode weights --async-scheduling --speculative-config {\"model\":\"/opt/ai-models/hf/glm52-quanttrio-vision\",\"method\":\"mtp\",\"quantization\":\"compressed-tensors\",\"draft_attention_backend\":\"B12X_MLA_SPARSE\",\"num_speculative_tokens\":5,\"draft_sample_method\":\"probabilistic\",\"adaptive_speculative_tokens_window\":32}
+"
 
   # DeepSeek V4 Flash — native FP4+FP8 mixed checkpoint, TP=2
   # ~158GB weights, ~79GB/node. Quality baseline — test first.
