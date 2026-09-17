@@ -177,7 +177,8 @@ declare -A MODELS=(
     NCCL_SHM_DISABLE=1
   "
 
-  # DeepSeek V4 Flash — local SSD, TP=2, mp executor (no Ray), silicon+phosphorus
+  # DeepSeek V4 Flash — local SSD, TP=2, mp executor (no Ray),
+  # Working and solid at 4x1M context on pairs of silicon+phosphorus AND magnesium+aluminium
   # Weights at /opt/ai-models/hf to eliminate NFS page cache pressure during Marlin prep.
   # CLUSTER_EXECUTOR_BACKEND=mp bypasses Ray OOM monitor (the TP=2 boot killer).
   # Same context as TP=4 baseline to start; tune after boot confirmed.
@@ -245,7 +246,7 @@ declare -A MODELS=(
   MAX_MODEL_LEN=290816
   MAX_NUM_SEQS=1
   MAX_NUM_BATCHED_TOKENS=4096
-  GPU_MEMORY_UTILIZATION=0.90
+  GPU_MEMORY_UTILIZATION=0.88
   ENABLE_PREFIX_CACHING=1
   TRUST_REMOTE_CODE=1
   ENABLE_AUTO_TOOL_CHOICE=1
@@ -278,7 +279,7 @@ declare -A MODELS=(
   NCCL_CUMEM_ENABLE=0
   NCCL_IGNORE_CPU_AFFINITY=1
   COMPILATION_CONFIG={\"cudagraph_mode\":\"FULL\",\"max_cudagraph_capture_size\":10}
-  VLLM_EXTRA_ARGS=--decode-context-parallel-size 2 --dcp-kv-cache-interleave-size 1 --attention-backend B12X_MLA_SPARSE --hf-overrides {\"index_topk_pattern\":\"FFFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSS\"} --limit-mm-per-prompt {\"image\":1,\"video\":0} --mm-processor-cache-gb 0 --mm-encoder-tp-mode weights --async-scheduling --speculative-config {\"method\":\"mtp\",\"quantization\":\"compressed-tensors\",\"draft_attention_backend\":\"B12X_MLA_SPARSE\",\"num_speculative_tokens\":5,\"draft_sample_method\":\"probabilistic\",\"adaptive_speculative_tokens_window\":32}
+  VLLM_EXTRA_ARGS=--decode-context-parallel-size 2 --dcp-kv-cache-interleave-size 1 --attention-backend B12X_MLA_SPARSE --hf-overrides {\"index_topk_pattern\":\"FFFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSS\"} --limit-mm-per-prompt {\"image\":1,\"video\":0} --mm-processor-cache-gb 0 --mm-encoder-tp-mode weights --async-scheduling --speculative-config {\"model\":\"/opt/ai-models/hf/QuantTrio/GLM-5.2-Int4-Int8Mix\",\"method\":\"mtp\",\"quantization\":\"compressed-tensors\",\"draft_attention_backend\":\"B12X_MLA_SPARSE\",\"num_speculative_tokens\":5,\"draft_sample_method\":\"probabilistic\",\"adaptive_speculative_tokens_window\":32}
 "
 
   # DeepSeek V4 Flash — native FP4+FP8 mixed checkpoint, TP=2
