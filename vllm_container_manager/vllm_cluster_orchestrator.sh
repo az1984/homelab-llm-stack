@@ -231,6 +231,7 @@ ensure_container() {
     -v /opt/ai-tools/cache/triton:/root/.triton/cache \
     -v /opt/ai-tools/cache/tilelang:/root/.tilelang/cache \
     -v /opt/ai-tools/cache/nv-compute:/root/.nv/ComputeCache \
+    -v /opt/ai-tools/cache/vllm-torch-compile:/root/.cache/vllm \
     -v /tmp/vllm_cluster_mgr.sh:/opt/vllm_cluster.sh:ro \
     ${entrypoint_args} \
     ${image_path} \
@@ -504,6 +505,7 @@ _wait_for_vllm() {
   local max_wait=900 elapsed=0 stage="starting"
   local cache_drop_15_25_done=false cache_drop_35_45_done=false
   local cache_drop_55_65_done=false cache_drop_75_85_done=false cache_drop_90_done=false
+  local cache_drop_postload_done=false cache_drop_precompile_done=false cache_drop_pregraph_done=false
 
   while [[ $elapsed -lt $max_wait ]]; do
     sleep 10; elapsed=$((elapsed + 10))
@@ -556,10 +558,24 @@ _wait_for_vllm() {
           cache_drop_90_done=true; _drop_page_cache_on_nodes "${pct}% loaded" "${nodes_to_use[@]}"
         fi
       fi
+    elif echo "$log_tail" | grep -q "Model loading took"; then
+      stage="loaded — dropping cache before KV init"
+      if [[ "$cache_drop_postload_done" == false ]]; then
+        cache_drop_postload_done=true
+        _drop_page_cache_on_nodes "post-load, pre-KV-init" "${nodes_to_use[@]}"
+      fi
     elif echo "$log_tail" | grep -q "torch.compile\|compile"; then
       stage="compiling"
+      if [[ "$cache_drop_precompile_done" == false ]]; then
+        cache_drop_precompile_done=true
+        _drop_page_cache_on_nodes "entering compile" "${nodes_to_use[@]}"
+      fi
     elif echo "$log_tail" | grep -q "CUDA graph\|Graph capturing"; then
       stage="capturing CUDA graphs"
+      if [[ "$cache_drop_pregraph_done" == false ]]; then
+        cache_drop_pregraph_done=true
+        _drop_page_cache_on_nodes "entering graph capture" "${nodes_to_use[@]}"
+      fi
     elif echo "$log_tail" | grep -q "Starting vLLM\|Application startup"; then
       stage="starting API server"
     fi
