@@ -104,7 +104,7 @@ extract_profile_field() {
   local default="${3:-}"
   local model_config="${MODELS[$profile]:-}"
   local val
-  val=$(echo "$model_config" | grep "^[[:space:]]*${field}=" | cut -d'=' -f2 | xargs)
+  val=$(echo "$model_config" | grep "^[[:space:]]*${field}=" | cut -d'=' -f2 | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
   echo "${val:-$default}"
 }
 
@@ -125,8 +125,8 @@ profile_env_args() {
   local model_config="$1"
   local args=""
   while IFS='=' read -r key value; do
-    key=$(echo "$key" | xargs)
-    value=$(echo "$value" | xargs)
+    key=$(printf '%s' "$key" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+    value=$(printf '%s' "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
     [[ -n "$key" && -n "$value" ]] && args="${args} -e ${key}=$(printf '%q' "${value}")"
   done <<< "${model_config}"
   echo "$args"
@@ -161,7 +161,7 @@ ensure_container() {
   if [[ "$profile" != "unknown" ]]; then
     local model_config="${MODELS[$profile]:-}"
     if [[ -n "${model_config}" ]]; then
-      served_name=$(echo "$model_config" | grep "SERVED_MODEL_NAME=" | cut -d'=' -f2 | xargs)
+      served_name=$(echo "$model_config" | grep "SERVED_MODEL_NAME=" | cut -d'=' -f2 | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
       p_env_args=$(profile_env_args "${model_config}")
     fi
   fi
@@ -348,11 +348,11 @@ cmd_load_model() {
   [[ -n "${model_config}" ]] || Die "Unknown profile '${profile}'"
 
   local ray_store_gb
-  ray_store_gb=$(echo "$model_config" | grep RAY_OBJECT_STORE_GB | cut -d'=' -f2 | xargs)
+  ray_store_gb=$(echo "$model_config" | grep RAY_OBJECT_STORE_GB | cut -d'=' -f2 | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
   local tp_size
-  tp_size=$(echo "$model_config" | grep TENSOR_PARALLEL_SIZE | cut -d'=' -f2 | xargs)
+  tp_size=$(echo "$model_config" | grep TENSOR_PARALLEL_SIZE | cut -d'=' -f2 | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
   local executor_backend
-  executor_backend=$(echo "$model_config" | grep CLUSTER_EXECUTOR_BACKEND | cut -d'=' -f2 | xargs)
+  executor_backend=$(echo "$model_config" | grep CLUSTER_EXECUTOR_BACKEND | cut -d'=' -f2 | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
 
   if [[ ${#ACTIVE_NODES[@]} -gt 0 && ${#ACTIVE_NODES[@]} -lt $tp_size ]]; then
     Die "Model requires ${tp_size} nodes, but only ${#ACTIVE_NODES[@]} active: ${ACTIVE_NODES[*]}"
@@ -433,9 +433,9 @@ cmd_load_model() {
   env_args="${env_args} $(profile_env_args "${model_config}")"
 
   local served_name
-  served_name=$(echo "$model_config" | grep SERVED_MODEL_NAME | cut -d'=' -f2 | xargs)
+  served_name=$(echo "$model_config" | grep SERVED_MODEL_NAME | cut -d'=' -f2 | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
   local vllm_port
-  vllm_port=$(echo "$model_config" | grep -E "VLLM_API_PORT|VLLM_PORT" | head -1 | cut -d'=' -f2 | xargs)
+  vllm_port=$(echo "$model_config" | grep -E "VLLM_API_PORT|VLLM_PORT" | head -1 | cut -d'=' -f2 | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
   vllm_port="${vllm_port:-8000}"
   local log_file="/opt/ai-tools/logs/vllm-cluster/vllm_${served_name}_node${head_node}_latest.log"
 

@@ -278,7 +278,7 @@ declare -A MODELS=(
   NCCL_CUMEM_ENABLE=0
   NCCL_IGNORE_CPU_AFFINITY=1
   COMPILATION_CONFIG={\"cudagraph_mode\":\"FULL\",\"max_cudagraph_capture_size\":10}
-  VLLM_EXTRA_ARGS=--decode-context-parallel-size 2 --dcp-kv-cache-interleave-size 1 --attention-backend B12X_MLA_SPARSE --hf-overrides {\"index_topk_pattern\":\"FFFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSS\"} --limit-mm-per-prompt {\"image\":1,\"video\":0} --mm-processor-cache-gb 0 --mm-encoder-tp-mode weights --async-scheduling --speculative-config {\"model\":\"/opt/ai-models/hf/glm52-quanttrio-vision\",\"method\":\"mtp\",\"quantization\":\"compressed-tensors\",\"draft_attention_backend\":\"B12X_MLA_SPARSE\",\"num_speculative_tokens\":5,\"draft_sample_method\":\"probabilistic\",\"adaptive_speculative_tokens_window\":32}
+  VLLM_EXTRA_ARGS=--decode-context-parallel-size 2 --dcp-kv-cache-interleave-size 1 --attention-backend B12X_MLA_SPARSE --hf-overrides {\"index_topk_pattern\":\"FFFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSS\"} --limit-mm-per-prompt {\"image\":1,\"video\":0} --mm-processor-cache-gb 0 --mm-encoder-tp-mode weights --async-scheduling --speculative-config {\"method\":\"mtp\",\"quantization\":\"compressed-tensors\",\"draft_attention_backend\":\"B12X_MLA_SPARSE\",\"num_speculative_tokens\":5,\"draft_sample_method\":\"probabilistic\",\"adaptive_speculative_tokens_window\":32}
 "
 
   # DeepSeek V4 Flash — native FP4+FP8 mixed checkpoint, TP=2
