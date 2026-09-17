@@ -237,16 +237,18 @@ declare -A MODELS=(
 	NUM_SPECULATIVE_TOKENS=2
   "
 
+#  VLLM_EXTRA_ARGS=--decode-context-parallel-size 2 --dcp-kv-cache-interleave-size 1 --attention-backend B12X_MLA_SPARSE --hf-overrides {\"index_topk_pattern\":\"FFFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSS\"} --limit-mm-per-prompt {\"image\":1,\"video\":0} --mm-processor-cache-gb 0 --mm-encoder-tp-mode weights --async-scheduling --kv-cache-memory-bytes 6.7g --speculative-config {\"model\":\"/opt/ai-models/hf/QuantTrio/GLM-5.2-Int4-Int8Mix\",\"method\":\"mtp\",\"quantization\":\"compressed-tensors\",\"draft_attention_backend\":\"B12X_MLA_SPARSE\",\"num_speculative_tokens\":5,\"draft_sample_method\":\"probabilistic\",\"adaptive_speculative_tokens_window\":32}
+
   [glm-5.2-quanttrio-vision]="
   DOCKER_IMAGE=vllm-eugr-glm52-vis
   MODEL_DIR=/opt/ai-models/hf/glm52-quanttrio-vision
   SERVED_MODEL_NAME=glm-5.2-quanttrio-vision
   TENSOR_PARALLEL_SIZE=4
   CLUSTER_EXECUTOR_BACKEND=mp
-  MAX_MODEL_LEN=290816
+  MAX_MODEL_LEN=204800
   MAX_NUM_SEQS=1
   MAX_NUM_BATCHED_TOKENS=4096
-  GPU_MEMORY_UTILIZATION=0.82
+  GPU_MEMORY_UTILIZATION=0.84
   ENABLE_PREFIX_CACHING=1
   TRUST_REMOTE_CODE=1
   ENABLE_AUTO_TOOL_CHOICE=1
@@ -259,7 +261,7 @@ declare -A MODELS=(
   VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
   VLLM_API_PORT=8210
   VLLM_MASTER_PORT=29502
-  ENFORCE_EAGER=0
+  ENFORCE_EAGER=1
   RAY_OBJECT_STORE_GB=1
   VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=1800
   VLLM_LOGGING_LEVEL=INFO
@@ -279,7 +281,7 @@ declare -A MODELS=(
   NCCL_CUMEM_ENABLE=0
   NCCL_IGNORE_CPU_AFFINITY=1
   COMPILATION_CONFIG={\"cudagraph_mode\":\"FULL\",\"max_cudagraph_capture_size\":10}
-  VLLM_EXTRA_ARGS=--decode-context-parallel-size 2 --dcp-kv-cache-interleave-size 1 --attention-backend B12X_MLA_SPARSE --hf-overrides {\"index_topk_pattern\":\"FFFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSS\"} --limit-mm-per-prompt {\"image\":1,\"video\":0} --mm-processor-cache-gb 0 --mm-encoder-tp-mode weights --async-scheduling --kv-cache-memory-bytes 8.2g --speculative-config {\"model\":\"/opt/ai-models/hf/QuantTrio/GLM-5.2-Int4-Int8Mix\",\"method\":\"mtp\",\"quantization\":\"compressed-tensors\",\"draft_attention_backend\":\"B12X_MLA_SPARSE\",\"num_speculative_tokens\":5,\"draft_sample_method\":\"probabilistic\",\"adaptive_speculative_tokens_window\":32}
+  VLLM_EXTRA_ARGS=--decode-context-parallel-size 2 --dcp-kv-cache-interleave-size 1 --attention-backend B12X_MLA_SPARSE --hf-overrides {\"index_topk_pattern\":\"FFFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSS\"} --limit-mm-per-prompt {\"image\":1,\"video\":0} --mm-processor-cache-gb 0 --mm-encoder-tp-mode weights --async-scheduling 
 "
 
   # DeepSeek V4 Flash — native FP4+FP8 mixed checkpoint, TP=2
