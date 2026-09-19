@@ -42,6 +42,9 @@ declare -A CUSTOM_IMAGES=(
   [vllm-jasl-ds4]="192.168.2.42:5000/vllm-jasl-ds4:2026-06-05_b01"
   [vllm-pasta]="192.168.2.42:5000/vllm-pasta:2026-06-12_b03"
   [vllm-eugr-glm52-vis]="10.10.10.1:5000/vllm-eugr-glm52-vis:2026-09-17_b01"
+  # Local tag as retagged on each node (see build-log Step 5) — registry push
+  # pending; update to the registry-qualified path once pushed.
+  [vllm-eugr-b12x-dsv4]="vllm-eugr-b12x-dsv4"
 )
 
 # Images that require a specific entrypoint (NGC-based images need their setup script)
@@ -103,11 +106,14 @@ declare -A MODELS=(
   # BLOCK_SIZE=256 required by V4 hybrid KV cache manager.
   # TOKENIZER_MODE=deepseek_v4 required (non-standard tokenizer arch).
 
-  # DeepSeek V4 Flash — native FP4+FP8 mixed checkpoint, TP=2
+  # DeepSeek V4 Flash — native FP4+FP8 mixed checkpoint, TP=4
   # ~158GB weights, ~79GB/node. Quality baseline — test first.
-  # Deploy: ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster deepseek-v4-flash
-  #         ./vllm_cluster_orchestrator.sh --nodes 3,4 load-model deepseek-v4-flash
-  [deepseek-v4-flash]="
+  # RENAMED from [deepseek-v4-flash] on 2026-09-19 to free that key for the
+  # TP=2 local-SSD profile (formerly deepseek-v4-flash-tp2-local), which is
+  # now the default daily-driver name. This TP=4 profile is unchanged otherwise.
+  # Deploy: ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster deepseek-v4-flash-tp4
+  #         ./vllm_cluster_orchestrator.sh --nodes 3,4 load-model deepseek-v4-flash-tp4
+  [deepseek-v4-flash-tp4]="
     DOCKER_IMAGE=vllm-jasl-ds4
     MODEL_DIR=/mnt/network/data/models/huggingface/hf/deepseek-ai/DeepSeek-V4-Flash
     SERVED_MODEL_NAME=deepseek-v4-flash-284b-a13b
@@ -183,17 +189,20 @@ declare -A MODELS=(
   # CLUSTER_EXECUTOR_BACKEND=mp bypasses Ray OOM monitor (the TP=2 boot killer).
   # Same context as TP=4 baseline to start; tune after boot confirmed.
   # MTP to be added once concurrency is validated.
-  # Deploy: ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster deepseek-v4-flash-tp2-local
-  #         ./vllm_cluster_orchestrator.sh --nodes 3,4 load-model deepseek-v4-flash-tp2-local
+  # RENAMED from [deepseek-v4-flash-tp2-local] on 2026-09-19 — this is now the
+  # daily-driver profile name. The old [deepseek-v4-flash] key (TP=4) moved to
+  # [deepseek-v4-flash-tp4] to make room.
+  # Deploy: ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster deepseek-v4-flash
+  #         ./vllm_cluster_orchestrator.sh --nodes 3,4 load-model deepseek-v4-flash
   
   # DeepSeek V4 Flash — local SSD, TP=2, mp executor (no Ray), silicon+phosphorus
   # Weights at /opt/ai-models/hf to eliminate NFS page cache pressure during Marlin prep.
   # DISTRIBUTED_EXECUTOR_BACKEND=mp bypasses Ray OOM monitor (the TP=2 boot killer).
   # Same context as TP=4 baseline to start; tune after boot confirmed.
   # MTP to be added once concurrency is validated.
-  # Deploy: ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster deepseek-v4-flash-tp2-local
-  #         ./vllm_cluster_orchestrator.sh --nodes 3,4 load-model deepseek-v4-flash-tp2-local
-  [deepseek-v4-flash-tp2-local]="
+  # Deploy: ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster deepseek-v4-flash
+  #         ./vllm_cluster_orchestrator.sh --nodes 3,4 load-model deepseek-v4-flash
+  [deepseek-v4-flash]="
     DOCKER_IMAGE=vllm-pasta
     MODEL_DIR=/opt/ai-models/hf/deepseek-ai/DeepSeek-V4-Flash
     SERVED_MODEL_NAME=deepseek-v4-flash-284b-a13b
@@ -201,7 +210,7 @@ declare -A MODELS=(
     CLUSTER_EXECUTOR_BACKEND=ray
     MAX_MODEL_LEN=1000000
     MAX_NUM_SEQS=4
-    MAX_NUM_BATCHED_TOKENS=4192
+    MAX_NUM_BATCHED_TOKENS=16384
     GPU_MEMORY_UTILIZATION=0.88
     ENABLE_PREFIX_CACHING=1
     ENABLE_CHUNKED_PREFILL=1
@@ -235,6 +244,73 @@ declare -A MODELS=(
     NCCL_SHM_DISABLE=1
 	SPECULATIVE_METHOD=deepseek_mtp
 	NUM_SPECULATIVE_TOKENS=2
+  "
+
+  # DeepSeek V4 Flash — Vision-Exp, local SSD, TP=2, B12X image
+  # Based on [deepseek-v4-flash] above — same decode/tuning config otherwise.
+  # CORRECTED 2026-09-19: this is NOT a clean prose-only/no-speed-change test
+  # the way originally assumed. The official checkpoint carries a FUSED DSPARK
+  # draft module (confirmed via vLLM recipe docs) — method below changed from
+  # deepseek_mtp to dspark accordingly; the old MTP config would likely have
+  # failed to find MTP-shaped weights. NUM_SPECULATIVE_TOKENS=5 follows the
+  # established DSpark pattern from Step 2/3 but is NOT confirmed against this
+  # specific checkpoint's own dspark_block_size — verify in config.json before
+  # first boot. Separately: DeepSeek's own benchmark comparison baseline for
+  # this checkpoint is 0731, not the plain preview, and its text-agent scores
+  # sit at 0731's tier — likely means Vision-Exp continues from 0731, not from
+  # the clean preview. If so this no longer isolates "vision only" as cleanly
+  # as Step 1 assumed; treat its prose read with the same RL-tuning caveat as
+  # Step 3, not as a clean baseline comparison. See runbook Benchmark section.
+  # Ports match [deepseek-v4-flash] intentionally — HAProxy expects a fixed
+  # port per role; these swap in/out on the same port, not run concurrently.
+  # Vision support is not yet in stable upstream vLLM (vllm-project/vllm#54566
+  # still open) — the official wheel without it routes this checkpoint to a
+  # text-only class and fails on vision tensors. B12X's changelog claims
+  # support; if boot fails with a text-only-class error, check that PR's status.
+  # Deploy: ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster deepseek-v4-flash-vis
+  #         ./vllm_cluster_orchestrator.sh --nodes 3,4 load-model deepseek-v4-flash-vis
+  [deepseek-v4-flash-vis]="
+    DOCKER_IMAGE=vllm-eugr-b12x-dsv4
+    MODEL_DIR=/opt/ai-models/hf/deepseek-ai/DeepSeek-V4-Flash-Vision-Exp
+    SERVED_MODEL_NAME=deepseek-v4-flash-vis-284b-a13b
+    TENSOR_PARALLEL_SIZE=2
+    CLUSTER_EXECUTOR_BACKEND=ray
+    MAX_MODEL_LEN=1000000
+    MAX_NUM_SEQS=4
+    MAX_NUM_BATCHED_TOKENS=16384
+    GPU_MEMORY_UTILIZATION=0.88
+    ENABLE_PREFIX_CACHING=1
+    ENABLE_CHUNKED_PREFILL=1
+    KV_CACHE_DTYPE=fp8
+    BLOCK_SIZE=256
+    TOKENIZER_MODE=deepseek_v4
+    HF_HUB_OFFLINE=1
+    TRUST_REMOTE_CODE=1
+    ENABLE_AUTO_TOOL_CHOICE=1
+    TOOL_CALL_PARSER=deepseek_v4
+    REASONING_PARSER=deepseek_v4
+    LOAD_FORMAT=safetensors
+    VLLM_API_PORT=8011
+    VLLM_MASTER_PORT=29501
+    RAY_MIN_WORKER_PORT=20000
+    RAY_MAX_WORKER_PORT=29000
+    RAY_OBJECT_STORE_GB=1
+    ENFORCE_EAGER=0
+    DTYPE=bfloat16
+    TORCH_CUDA_ARCH_LIST=12.1a
+    VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
+    VLLM_TRITON_MLA_SPARSE=1
+    FLASHINFER_DISABLE_VERSION_CHECK=1
+    TILELANG_CLEANUP_TEMP_FILES=1
+    DG_JIT_USE_NVRTC=0
+    DG_JIT_NVCC_COMPILER=/usr/local/cuda/bin/nvcc
+    NCCL_IB_DISABLE=0
+    NCCL_DEBUG=WARN
+    VLLM_EXTRA_ARGS=--disable-custom-all-reduce
+    NCCL_NVLS_ENABLE=0
+    NCCL_SHM_DISABLE=1
+	SPECULATIVE_METHOD=dspark
+	NUM_SPECULATIVE_TOKENS=5
   "
 
 #  VLLM_EXTRA_ARGS=--decode-context-parallel-size 2 --dcp-kv-cache-interleave-size 1 --attention-backend B12X_MLA_SPARSE --hf-overrides {\"index_topk_pattern\":\"FFFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSS\"} --limit-mm-per-prompt {\"image\":1,\"video\":0} --mm-processor-cache-gb 0 --mm-encoder-tp-mode weights --async-scheduling --kv-cache-memory-bytes 6.7g --speculative-config {\"model\":\"/opt/ai-models/hf/QuantTrio/GLM-5.2-Int4-Int8Mix\",\"method\":\"mtp\",\"quantization\":\"compressed-tensors\",\"draft_attention_backend\":\"B12X_MLA_SPARSE\",\"num_speculative_tokens\":5,\"draft_sample_method\":\"probabilistic\",\"adaptive_speculative_tokens_window\":32}

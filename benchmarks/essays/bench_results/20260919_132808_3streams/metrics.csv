@@ -1,0 +1,4 @@
+stream_id|subject|finish_reason|prompt_tokens|completion_tokens|total_tokens|wall_seconds|tok_per_sec
+2|Antarctic Ice Core Records as Climate History Archives|stop|81|1946|2027|79.258589000|24.5
+1|The Mathematics of Origami and Its Applications in Engineering|stop|83|2133|2216|84.867102000|25.1
+3|The Role of Spice Trade Routes in Shaping Global Civilization|stop|85|2103|2188|84.967496000|24.7

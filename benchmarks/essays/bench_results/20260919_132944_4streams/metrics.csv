@@ -1,0 +1,5 @@
+stream_id|subject|finish_reason|prompt_tokens|completion_tokens|total_tokens|wall_seconds|tok_per_sec
+4|The History and Chemistry of Natural Dye Production|stop|82|1811|1893|81.893607000|22.1
+3|Coral Reef Symbiosis and Ecosystem Interdependence|stop|83|2103|2186|93.414793000|22.5
+2|The Physics of Musical Instrument Resonance|stop|79|2122|2201|93.867016000|22.6
+1|Volcanic Soil Fertility and Its Influence on Agricultural Civilizations|stop|85|2451|2536|103.185269000|23.7
