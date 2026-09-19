@@ -203,7 +203,7 @@ declare -A MODELS=(
   # Deploy: ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster deepseek-v4-flash
   #         ./vllm_cluster_orchestrator.sh --nodes 3,4 load-model deepseek-v4-flash
   [deepseek-v4-flash]="
-    DOCKER_IMAGE=vllm-pasta
+    DOCKER_IMAGE=vllm-eugr-b12x-dsv4
     MODEL_DIR=/opt/ai-models/hf/deepseek-ai/DeepSeek-V4-Flash
     SERVED_MODEL_NAME=deepseek-v4-flash-284b-a13b
     TENSOR_PARALLEL_SIZE=2

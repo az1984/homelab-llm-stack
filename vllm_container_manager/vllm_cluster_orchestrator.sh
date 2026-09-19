@@ -527,17 +527,30 @@ _wait_for_vllm() {
       return 1
     fi
 
-    local health
-	health=$(curl -sf --connect-timeout 2 --max-time 5 "http://${node_ip}:${vllm_port}/health")
-	curl_exit=$?
-	Log "  [DEBUG] curl exit=${curl_exit} health='${health}' target=http://${node_ip}:${vllm_port}/health"
-
-    if [[ -n "$health" ]]; then
-      Log "  [${elapsed}s] READY — vLLM responding on port ${vllm_port}"
-      local models
-      models=$(curl -sf "http://${node_ip}:${vllm_port}/v1/models" 2>/dev/null \
-        | python3 -c "import sys,json; [print(m['id']) for m in json.load(sys.stdin).get('data',[])]" 2>/dev/null || true)
-      [[ -n "$models" ]] && Log "  Serving: ${models}"
+    # READY check: grep the FULL log (not tail -3 — startup traffic can scroll
+    # the line out of a 3-line window within the same 10s poll cycle) for the
+    # one line that actually means "up": FastAPI's lifespan handler only prints
+    # this after startup genuinely completes. "Starting vLLM server on ..." is
+    # NOT this line — that prints before the bind is even attempted.
+    # Replaces the curl-gated /health check (2026-09-19) — that check's own
+    # curl was, for reasons never root-caused across three instrumentation
+    # attempts, not reflecting reality: the server was confirmed via full log
+    # capture to be answering /health 200 OK for 13+ minutes while this loop's
+    # curl-based branch never fired. Log-grep sidesteps whatever that was.
+    local log_ready
+    log_ready=$(ssh admin@${node_ip} "sudo docker exec ${container_name} grep -q 'Application startup complete' ${log_file} && echo yes" 2>/dev/null || true)
+    if [[ "$log_ready" == "yes" ]]; then
+      Log "  [${elapsed}s] READY — Application startup complete (log-confirmed)"
+      local health
+      health=$(curl -sf --connect-timeout 2 --max-time 5 "http://${node_ip}:${vllm_port}/health" 2>/dev/null) && : || health=""
+      if [[ -n "$health" ]]; then
+        local models
+        models=$(curl -sf "http://${node_ip}:${vllm_port}/v1/models" 2>/dev/null \
+          | python3 -c "import sys,json; [print(m['id']) for m in json.load(sys.stdin).get('data',[])]" 2>/dev/null) && : || models=""
+        [[ -n "$models" ]] && Log "  Serving: ${models}"
+      else
+        Log "  NOTE: /health did not respond even though the log confirms startup — informational only, not gating"
+      fi
       return 0
     fi
 
