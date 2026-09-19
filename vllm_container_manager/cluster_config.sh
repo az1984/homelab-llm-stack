@@ -44,7 +44,7 @@ declare -A CUSTOM_IMAGES=(
   [vllm-eugr-glm52-vis]="10.10.10.1:5000/vllm-eugr-glm52-vis:2026-09-17_b01"
   # Local tag as retagged on each node (see build-log Step 5) — registry push
   # pending; update to the registry-qualified path once pushed.
-  [vllm-eugr-b12x-dsv4]="vllm-eugr-b12x-dsv4"
+  [vllm-eugr-b12x-dsv4]="192.168.2.42:5000/vllm-eugr-b12x-dsv4:2026-09-19_b01"
 )
 
 # Images that require a specific entrypoint (NGC-based images need their setup script)
@@ -209,7 +209,7 @@ declare -A MODELS=(
     TENSOR_PARALLEL_SIZE=2
     CLUSTER_EXECUTOR_BACKEND=ray
     MAX_MODEL_LEN=1000000
-    MAX_NUM_SEQS=3
+    MAX_NUM_SEQS=2
     MAX_NUM_BATCHED_TOKENS=8192
     GPU_MEMORY_UTILIZATION=0.88
     ENABLE_PREFIX_CACHING=1
@@ -276,7 +276,7 @@ declare -A MODELS=(
     TENSOR_PARALLEL_SIZE=2
     CLUSTER_EXECUTOR_BACKEND=ray
     MAX_MODEL_LEN=1000000
-    MAX_NUM_SEQS=3
+    MAX_NUM_SEQS=2
     MAX_NUM_BATCHED_TOKENS=8192
     GPU_MEMORY_UTILIZATION=0.88
     ENABLE_PREFIX_CACHING=1
