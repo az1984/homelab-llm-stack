@@ -528,7 +528,10 @@ _wait_for_vllm() {
     fi
 
     local health
-    health=$(curl -sf --connect-timeout 2 --max-time 5 "http://${node_ip}:${vllm_port}/health" 2>/dev/null || true)
+	health=$(curl -sf --connect-timeout 2 --max-time 5 "http://${node_ip}:${vllm_port}/health")
+	curl_exit=$?
+	Log "  [DEBUG] curl exit=${curl_exit} health='${health}' target=http://${node_ip}:${vllm_port}/health"
+
     if [[ -n "$health" ]]; then
       Log "  [${elapsed}s] READY — vLLM responding on port ${vllm_port}"
       local models
