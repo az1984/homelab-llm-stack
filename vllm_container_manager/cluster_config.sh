@@ -45,6 +45,9 @@ declare -A CUSTOM_IMAGES=(
   # Local tag as retagged on each node (see build-log Step 5) — registry push
   # pending; update to the registry-qualified path once pushed.
   [vllm-eugr-b12x-dsv4]="192.168.2.42:5000/vllm-eugr-b12x-dsv4:2026-09-19_b01"
+  # Stock upstream vLLM 0.34.0 (arm64 native). Added 2026-11-17 for Qwen3.8-Flash-Next.
+  # TODO: mirror to 192.168.2.42:5000 once smoke test passes, then repoint.
+  [vllm-official-0.34]="vllm/vllm-openai:v0.34.0"
 )
 
 # Images that require a specific entrypoint (NGC-based images need their setup script)
@@ -880,6 +883,68 @@ declare -A MODELS=(
     ENFORCE_EAGER=0
   "
 
+
+  # =========================================================================
+  # Qwen3.8-Flash-Next (Qwen4Exp: GDN + QSA hybrid, 125B-A6B + 51B PLE, vision)
+  # =========================================================================
+  # Added 2026-11-17. Goal: DSv4-Flash-class coder WITH native vision, so
+  # screenshots don't need the separate small-Qwen MCP hop.
+  # Checkpoint: nvidia/Qwen3.8-Flash-Next-NVFP4 (132.7 GB; NVFP4 routed
+  #   experts, BF16 attn/vision, FP8 PLE). Inferact build is 182.8 GB — too
+  #   tight at TP=2 with 3x850k KV. RadixArk (135 GB) is the fallback.
+  # Image: stock upstream v0.34.0. Needs >=0.31 for FP8 KV on QSA (#55557)
+  #   and GDN prefix-cache fixes. mp executor: stock image may lack Ray.
+  # Context: YaRN via --hf-overrides per Qwen model card. factor =
+  #   MAX_MODEL_LEN / 262144 = 870400 / 262144 = 3.3203125 (matches DSv4 len,
+  #   so Zoo Code needs one workspace config). Static YaRN: short prompts pay
+  #   a small quality cost. VERIFY after boot that the log shows rope_type
+  #   yarn — VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 would otherwise silently allow
+  #   >262k with NO scaling (garbage past 262k).
+  # Prefix caching ON: the whole point for 400k+ Zoo Code sessions. If GDN
+  #   prefix-cache crashes (cf. #54173), that's the first thing to report.
+  # MTP OFF for smoke test. NVIDIA ckpt's FP8 MTP head needed unmerged
+  #   PR #55513 as of Sept; if 0.34 loads it, enable with:
+  #     SPECULATIVE_METHOD=mtp / SPECULATIVE_NUM_TOKENS=1  (k=1 beat k=3 here)
+  #   NOTE: use SPECULATIVE_NUM_TOKENS, not NUM_SPECULATIVE_TOKENS — the mgr
+  #   ignores the latter when SPECULATIVE_METHOD is set.
+  # torch.compile off (mode 0) + decode CUDA graphs: avoids Inductor
+  #   duplicating the PLE table (~24 GB/box at TP=2).
+  # Port 8012 / master 29503 so it can coexist with DSv4 (8011) on the other pair.
+  # Deploy: ./vllm_cluster_orchestrator.sh --nodes 3,4 start-cluster qwen38-flash-next
+  #         ./vllm_cluster_orchestrator.sh --nodes 3,4 load-model qwen38-flash-next
+  [qwen38-flash-next]="
+    DOCKER_IMAGE=vllm-official-0.34
+    MODEL_DIR=/opt/ai-models/hf/nvidia/Qwen3.8-Flash-Next-NVFP4
+    SERVED_MODEL_NAME=qwen3.8-flash-next
+    TENSOR_PARALLEL_SIZE=2
+    CLUSTER_EXECUTOR_BACKEND=mp
+    MAX_MODEL_LEN=870400
+    MAX_NUM_SEQS=3
+    MAX_NUM_BATCHED_TOKENS=8192
+    GPU_MEMORY_UTILIZATION=0.80
+    ENABLE_PREFIX_CACHING=1
+    ENABLE_CHUNKED_PREFILL=1
+    KV_CACHE_DTYPE=fp8
+    QUANTIZATION=modelopt
+    HF_HUB_OFFLINE=1
+    TRUST_REMOTE_CODE=1
+    ENABLE_AUTO_TOOL_CHOICE=1
+    TOOL_CALL_PARSER=qwen3_xml
+    REASONING_PARSER=qwen3
+    LOAD_FORMAT=safetensors
+    VLLM_API_PORT=8012
+    VLLM_MASTER_PORT=29503
+    ENFORCE_EAGER=0
+    DTYPE=bfloat16
+    VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
+    PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+    NCCL_IB_DISABLE=0
+    NCCL_DEBUG=WARN
+    NCCL_NVLS_ENABLE=0
+    NCCL_SHM_DISABLE=1
+    COMPILATION_CONFIG={\"mode\":0,\"cudagraph_mode\":\"FULL_DECODE_ONLY\"}
+    VLLM_EXTRA_ARGS=--disable-custom-all-reduce --hf-overrides {\"text_config\":{\"rope_parameters\":{\"rope_type\":\"yarn\",\"factor\":3.3203125,\"original_max_position_embeddings\":262144,\"rope_theta\":10000000,\"partial_rotary_factor\":0.25,\"mrope_interleaved\":true,\"mrope_section\":[11,11,10]}}}
+  "
 )
 
 # Default image if model profile doesn't specify DOCKER_IMAGE
